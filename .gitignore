@@ -1,0 +1,4 @@
+/data/
+Pipfile.lock
+__pycache__/
+luddcam-settings.json

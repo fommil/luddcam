@@ -1,0 +1,604 @@
+from ctypes import *
+from enum import IntEnum
+import platform
+
+import numpy as np
+from box import Box
+
+class ASI_BAYER_PATTERN(IntEnum):
+    ASI_BAYER_RG = 0  # RGGB
+    ASI_BAYER_BG = 1
+    ASI_BAYER_GR = 2
+    ASI_BAYER_GB = 3
+
+class ASI_IMG_TYPE(IntEnum):
+    ASI_IMG_RAW8 = 0     # Each pixel is an 8-bit (1 byte) gray level
+    ASI_IMG_RGB24 = 1    # Each pixel consists of RGB, 3 bytes totally (color cameras only)
+    ASI_IMG_RAW16 = 2    # 2 bytes for every pixel with 65536 gray levels
+    ASI_IMG_Y8 = 3       # monochrome mode，1 byte every pixel (color cameras only)
+    ASI_IMG_END = -1
+
+class ASI_GUIDE_DIRECTION(IntEnum):
+    ASI_GUIDE_NORTH = 0
+    ASI_GUIDE_SOUTH = 1
+    ASI_GUIDE_EAST = 2
+    ASI_GUIDE_WEST = 3
+
+class ASI_FLIP_STATUS(IntEnum):
+    ASI_FLIP_NONE = 0     # no flip
+    ASI_FLIP_HORIZ = 1    # horizontal image flip
+    ASI_FLIP_VERT = 2     # vertical image flip
+    ASI_FLIP_BOTH = 3     # horizontal + vertical image flip
+
+class ASI_CAMERA_MODE(IntEnum):
+    ASI_MODE_NORMAL = 0
+    ASI_MODE_TRIG_SOFT_EDGE = 1
+    ASI_MODE_TRIG_RISE_EDGE = 2
+    ASI_MODE_TRIG_FALL_EDGE = 3
+    ASI_MODE_TRIG_SOFT_LEVEL = 4
+    ASI_MODE_TRIG_HIGH_LEVEL = 5
+    ASI_MODE_TRIG_LOW_LEVEL = 6
+    ASI_MODE_END = -1
+
+class ASI_ERROR_CODE(IntEnum):
+    ASI_SUCCESS = 0                    # operation was successful
+    ASI_ERROR_INVALID_INDEX = 1       # no camera connected or index value out of boundary
+    ASI_ERROR_INVALID_ID = 2          # invalid ID
+    ASI_ERROR_INVALID_CONTROL_TYPE = 3  # invalid control type
+    ASI_ERROR_CAMERA_CLOSED = 4       # camera didn't open
+    ASI_ERROR_CAMERA_REMOVED = 5      # failed to find the camera, maybe the camera has been removed
+    ASI_ERROR_INVALID_PATH = 6        # cannot find the path of the file
+    ASI_ERROR_INVALID_FILEFORMAT = 7
+    ASI_ERROR_INVALID_SIZE = 8        # wrong video format size
+    ASI_ERROR_INVALID_IMGTYPE = 9     # unsupported image format
+    ASI_ERROR_OUTOF_BOUNDARY = 10     # the startpos is outside the image boundary
+    ASI_ERROR_TIMEOUT = 11            # timeout
+    ASI_ERROR_INVALID_SEQUENCE = 12   # stop capture first
+    ASI_ERROR_BUFFER_TOO_SMALL = 13   # buffer size is not big enough
+    ASI_ERROR_VIDEO_MODE_ACTIVE = 14
+    ASI_ERROR_EXPOSURE_IN_PROGRESS = 15
+    ASI_ERROR_GENERAL_ERROR = 16      # general error, eg: value is out of valid range
+    ASI_ERROR_END = 17
+
+class ASI_BOOL(IntEnum):
+    ASI_FALSE = 0
+    ASI_TRUE = 1
+
+class ASI_CONTROL_TYPE(IntEnum):
+    ASI_GAIN = 0                    # gain
+    ASI_EXPOSURE = 1                # exposure time (microsecond)
+    ASI_GAMMA = 2                   # gamma with range 1 to 100 (nominally 50)
+    ASI_WB_R = 3                    # red component of white balance
+    ASI_WB_B = 4                    # blue component of white balance
+    ASI_BRIGHTNESS = 5              # pixel value offset (a bias, not a scale factor)
+    ASI_BANDWIDTHOVERLOAD = 6       # the total data transfer rate percentage
+    ASI_OVERCLOCK = 7               # over clock
+    ASI_TEMPERATURE = 8             # sensor temperature,10 times the actual temperature
+    ASI_FLIP = 9                    # image flip
+    ASI_AUTO_MAX_GAIN = 10          # maximum gain when auto adjust
+    ASI_AUTO_MAX_EXP = 11           # maximum exposure time when auto adjust，unit is microseconds
+    ASI_AUTO_MAX_BRIGHTNESS = 12    # target brightness when auto adjust
+    ASI_HARDWARE_BIN = 13           # hardware binning of pixels
+    ASI_HIGH_SPEED_MODE = 14        # high speed mode
+    ASI_COOLER_POWER_PERC = 15      # cooler power percent (only cool camera)
+    ASI_TARGET_TEMP = 16            # sensor's target temperature (only cool camera) don't multiply by 10
+    ASI_COOLER_ON = 17              # open cooler (only cool camera)
+    ASI_MONO_BIN = 18               # lead to a smaller grid at software bin mode for color camera
+    ASI_FAN_ON = 19                 # only cooled camera has fan
+    ASI_PATTERN_ADJUST = 20         # currently only supported by 1600 mono camera
+    ASI_ANTI_DEW_HEATER = 21
+
+class ASI_EXPOSURE_STATUS(IntEnum):
+    ASI_EXP_IDLE = 0     # idle, ready to start exposure
+    ASI_EXP_WORKING = 1  # exposure in progress
+    ASI_EXP_SUCCESS = 2  # exposure completed successfully, image can be read out
+    ASI_EXP_FAILED = 3   # exposure failure, need to restart exposure
+
+class ASI_CAMERA_INFO(Structure):
+    _fields_ = [
+        ("Name", c_char * 64),
+        ("CameraID", c_int),
+        ("MaxHeight", c_long),
+        ("MaxWidth", c_long),
+        ("IsColorCam", c_int),
+        ("BayerPattern", c_int),
+        ("SupportedBins", c_int * 16),
+        ("SupportedVideoFormat", c_int * 8),
+        ("PixelSize", c_double),
+        ("MechanicalShutter", c_int),
+        ("ST4Port", c_int),
+        ("IsCoolerCam", c_int),
+        ("IsUSB3Host", c_int),
+        ("IsUSB3Camera", c_int),
+        ("ElecPerADU", c_float),
+        ("BitDepth", c_int),
+        ("IsTriggerCam", c_int),
+        ("Unused", c_char * 16)
+    ]
+
+    def name(self):
+        return self.Name.decode('utf-8', errors='ignore').rstrip('\x00')
+
+class ASI_CONTROL_CAPS(Structure):
+    _fields_ = [
+        ("Name", c_char * 64),
+        ("Description", c_char * 128),
+        ("MaxValue", c_long),
+        ("MinValue", c_long),
+        ("DefaultValue", c_long),
+        ("IsAutoSupported", c_int),  # ASI_BOOL
+        ("IsWritable", c_int),       # ASI_BOOL
+        ("ControlType", c_int),      # ASI_CONTROL_TYPE
+        ("Unused", c_char * 32)
+    ]
+
+    def name(self):
+        return self.Name.decode('utf-8', errors='ignore').rstrip('\x00')
+
+class AsiCamera2:
+    def __init__(self):
+        arch = get_normalized_arch()
+        self.lib = CDLL(f"lib/{arch}/libASICamera2.so.1.37")
+
+        self.lib.ASIGetNumOfConnectedCameras.restype = c_int
+        self.lib.ASIGetNumOfConnectedCameras.argtypes = []
+
+        self.lib.ASIGetProductIDs.restype = c_int
+        self.lib.ASIGetProductIDs.argtypes = [POINTER(c_int)]
+
+        self.lib.ASIGetSDKVersion.restype = c_char_p
+        self.lib.ASIGetSDKVersion.argtypes = []
+
+        self.lib.ASICameraCheck.restype = c_int  # ASI_BOOL
+        self.lib.ASICameraCheck.argtypes = [c_int, c_int]
+
+        self.lib.ASIGetCameraProperty.restype = c_int
+        self.lib.ASIGetCameraProperty.argtypes = [c_void_p, c_int]  # ASI_CAMERA_INFO*, int
+
+        self.lib.ASIOpenCamera.restype = c_int
+        self.lib.ASIOpenCamera.argtypes = [c_int]
+
+        self.lib.ASIInitCamera.restype = c_int
+        self.lib.ASIInitCamera.argtypes = [c_int]
+
+        self.lib.ASICloseCamera.restype = c_int
+        self.lib.ASICloseCamera.argtypes = [c_int]
+
+        self.lib.ASIGetNumOfControls.restype = c_int
+        self.lib.ASIGetNumOfControls.argtypes = [c_int, POINTER(c_int)]
+
+        self.lib.ASIGetControlCaps.restype = c_int
+        self.lib.ASIGetControlCaps.argtypes = [c_int, c_int, c_void_p]  # ASI_CONTROL_CAPS*
+
+        self.lib.ASIGetControlValue.restype = c_int
+        self.lib.ASIGetControlValue.argtypes = [c_int, c_int, POINTER(c_long), POINTER(c_int)]
+
+        self.lib.ASISetControlValue.restype = c_int
+        self.lib.ASISetControlValue.argtypes = [c_int, c_int, c_long, c_int]
+
+        self.lib.ASISetROIFormat.restype = c_int
+        self.lib.ASISetROIFormat.argtypes = [c_int, c_int, c_int, c_int, c_int]
+
+        self.lib.ASIGetROIFormat.restype = c_int
+        self.lib.ASIGetROIFormat.argtypes = [c_int, POINTER(c_int), POINTER(c_int), POINTER(c_int), POINTER(c_int)]
+
+        self.lib.ASISetStartPos.restype = c_int
+        self.lib.ASISetStartPos.argtypes = [c_int, c_int, c_int]
+
+        self.lib.ASIGetStartPos.restype = c_int
+        self.lib.ASIGetStartPos.argtypes = [c_int, POINTER(c_int), POINTER(c_int)]
+
+        self.lib.ASIGetDroppedFrames.restype = c_int
+        self.lib.ASIGetDroppedFrames.argtypes = [c_int, POINTER(c_int)]
+
+        self.lib.ASIEnableDarkSubtract.restype = c_int
+        self.lib.ASIEnableDarkSubtract.argtypes = [c_int, c_char_p]
+
+        self.lib.ASIDisableDarkSubtract.restype = c_int
+        self.lib.ASIDisableDarkSubtract.argtypes = [c_int]
+
+        self.lib.ASIStartVideoCapture.restype = c_int
+        self.lib.ASIStartVideoCapture.argtypes = [c_int]
+
+        self.lib.ASIStopVideoCapture.restype = c_int
+        self.lib.ASIStopVideoCapture.argtypes = [c_int]
+
+        self.lib.ASIGetVideoData.restype = c_int
+        self.lib.ASIGetVideoData.argtypes = [c_int, POINTER(c_ubyte), c_long, c_int]
+
+        self.lib.ASIPulseGuideOn.restype = c_int
+        self.lib.ASIPulseGuideOn.argtypes = [c_int, c_int]
+
+        self.lib.ASIPulseGuideOff.restype = c_int
+        self.lib.ASIPulseGuideOff.argtypes = [c_int, c_int]
+
+        self.lib.ASIStartExposure.restype = c_int
+        self.lib.ASIStartExposure.argtypes = [c_int]
+
+        self.lib.ASIStopExposure.restype = c_int
+        self.lib.ASIStopExposure.argtypes = [c_int]
+
+        self.lib.ASIGetExpStatus.restype = c_int
+        self.lib.ASIGetExpStatus.argtypes = [c_int, POINTER(c_int)]
+
+        self.lib.ASIGetDataAfterExp.restype = c_int
+        self.lib.ASIGetDataAfterExp.argtypes = [c_int, POINTER(c_ubyte), c_long]
+
+        self.lib.ASIGetID.restype = c_int
+        self.lib.ASIGetID.argtypes = [c_int, c_void_p]  # ASI_ID*
+
+        self.lib.ASISetID.restype = c_int
+        self.lib.ASISetID.argtypes = [c_int, c_void_p]  # ASI_ID
+
+        self.lib.ASIGetCameraSupportMode.restype = c_int
+        self.lib.ASIGetCameraSupportMode.argtypes = [c_int, c_void_p]  # ASI_SUPPORTED_MODE*
+
+        self.lib.ASIGetCameraMode.restype = c_int
+        self.lib.ASIGetCameraMode.argtypes = [c_int, POINTER(c_int)]
+
+        self.lib.ASISetCameraMode.restype = c_int
+        self.lib.ASISetCameraMode.argtypes = [c_int, c_int]
+
+        self.lib.ASISendSoftTrigger.restype = c_int
+        self.lib.ASISendSoftTrigger.argtypes = [c_int, c_int]
+
+    # returns a class with fields: name, guide, cooling, gain_{min, max, unity, default}:
+    def cameras(self):
+        num_cameras = self.lib.ASIGetNumOfConnectedCameras()
+        print(f"Number of connected cameras: {num_cameras}")
+
+        cameras = []
+        for i in range(num_cameras):
+            c = Camera(self.lib, i)
+            camera = Box()
+            camera.name = c.name
+            camera.guide = bool(c.info.ST4Port)
+            if camera.name == "ZWO ASI1600MM Pro":
+                # older models had an ST4 port
+                camera.guide = False
+            camera.cooling = bool(c.info.IsCoolerCam)
+
+            if (caps := c.controls[ASI_CONTROL_TYPE.ASI_GAIN]):
+                camera.gain_min = caps.MinValue
+                camera.gain_max = caps.MaxValue
+                camera.gain_default = caps.DefaultValue
+            camera.gain_unity = get_unity_gain(camera.name)
+
+            cameras.append(camera)
+        return cameras
+
+    def find_camera(self, name):
+        num_cameras = self.lib.ASIGetNumOfConnectedCameras()
+        print(f"Number of connected cameras: {num_cameras}")
+
+        for i in range(num_cameras):
+            camera = Camera(self.lib, i)
+            if camera.name == name:
+                return camera
+
+class Camera:
+    def __init__(self, lib, i):
+        self.lib = lib
+        self.i = c_int(i)
+        self.info = ASI_CAMERA_INFO()
+        self.name = None
+        self.target_temp = None
+
+        result = self.lib.ASIGetCameraProperty(byref(self.info), self.i)
+        if result != 0:
+            print(f"error getting camera properties {i} = {result}")
+            return
+        self.name = self.info.name()
+
+        # if (result := self.lib.ASICloseCamera(self.i)) != 0:
+        #     print(f"error closing camera {i}, ignoring")
+
+        result = self.lib.ASIOpenCamera(self.i)
+        if result != 0:
+            print(f"error opening camera {i} = {result}")
+            return
+
+        num_controls = c_int()
+        result = self.lib.ASIGetNumOfControls(self.i, byref(num_controls))
+        if result != 0:
+            print(f"error getting camera controls {i} = {result}")
+            return
+
+        self.controls = {}
+        for c in range(num_controls.value):
+            caps = ASI_CONTROL_CAPS()
+            result = self.lib.ASIGetControlCaps(self.i, c, byref(caps))
+            if result != 0:
+                print(f"error getting camera caps {i}, {c} = {result}")
+                continue
+            self.controls[caps.ControlType] = caps
+            # print(f"DEBUG: control type {caps.ControlType} is {caps.name()}")
+            # print(f"  Name:           {caps.Name.decode(errors='ignore')}")
+            # print(f"  Description:    {caps.Description.decode(errors='ignore')}")
+            # print(f"  ControlType:    {caps.ControlType}")
+            # print(f"  MinValue:       {caps.MinValue}")
+            # print(f"  MaxValue:       {caps.MaxValue}")
+            # print(f"  DefaultValue:   {caps.DefaultValue}")
+            # print(f"  IsWritable:     {'Yes' if caps.IsWritable else 'No'}")
+            # print(f"  Auto Supported: {'Yes' if caps.IsAutoSupported else 'No'}")
+
+        # if (result := self.lib.ASIOpenCamera(self.i)) != 0:
+        #     print(f"error opening camera {self.i} {result}")
+        #     return
+        if (result := self.lib.ASISetCameraMode(self.i, ASI_CAMERA_MODE.ASI_MODE_NORMAL)) != 0:
+            print(f"error setting camera to snap mode")
+            return
+        if (result := self.lib.ASIInitCamera(self.i)) != 0:
+            print(f"error init camera {self.i} {result}")
+            return
+
+    def temp(self):
+        value = c_long()
+        if (result := self.lib.ASIGetControlValue(self.i, ASI_CONTROL_TYPE.ASI_TEMPERATURE, byref(value), byref(c_int(ASI_BOOL.ASI_FALSE)))) != 0:
+            print(f"error getting temp {self.i} {result}")
+        return value.value / 10.0
+
+    def cooler(self):
+        value = c_long()
+        if (result := self.lib.ASIGetControlValue(self.i, ASI_CONTROL_TYPE.ASI_COOLER_POWER_PERC, byref(value), byref(c_int(ASI_BOOL.ASI_FALSE)))) != 0:
+            print(f"error getting temp {self.i} {result}")
+        return value.value
+
+    def cooling(self, temp):
+        # print("ASI_FAN_ON supported:", ASI_CONTROL_TYPE.ASI_FAN_ON in self.controls)
+        if ASI_CONTROL_TYPE.ASI_FAN_ON in self.controls:
+            if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_FAN_ON, ASI_BOOL.ASI_TRUE, ASI_BOOL.ASI_FALSE)) != 0:
+                print(f"error when enabling the fan")
+                return
+        #print("ASI_COOLER_ON supported:", ASI_CONTROL_TYPE.ASI_COOLER_ON in self.controls)
+        if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_COOLER_ON, ASI_BOOL.ASI_TRUE, ASI_BOOL.ASI_FALSE)) != 0:
+            print(f"error when enabling the cooling")
+            return
+        if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_TARGET_TEMP, c_long(temp), ASI_BOOL.ASI_FALSE)) != 0:
+            print(f"error when setting the target temperature")
+            return
+
+        self.target_temp = temp
+
+    def capture_start(self, gain, exposure):
+        # if we don't do this then we can't even create the first one
+        if (result := self.lib.ASIStopExposure(self.i)) != 0:
+            print(f"failed to stop (potentially stale) exposures")
+            return
+
+        width = int(self.info.MaxWidth)
+        height = int(self.info.MaxHeight)
+        # print(f"max dims are {width}, {height}")
+        # width, height, binning, img_type = c_int(), c_int(), c_int(), c_int()
+        # assert self.lib.ASIGetROIFormat(self.i, byref(width), byref(height), byref(binning), byref(img_type)) == 0
+        # print(f"initial roi was {width}, {height}, {binning}, {img_type}")
+        # assert width.value == self.info.MaxWidth
+        # assert height.value == self.info.MaxHeight
+        # assert binning.value == 1
+        # assert img_type.value == ASI_IMG_TYPE.ASI_IMG_RAW16
+
+        print(f"DEBUG: starting a capture with w={width},h={height}")
+        if (result := self.lib.ASISetROIFormat(self.i, c_int(width), c_int(height), c_int(1), ASI_IMG_TYPE.ASI_IMG_RAW16)) != 0:
+            print(f"error setting image format {self.i} {result}")
+            return
+        if (result := self.lib.ASISetStartPos(self.i, c_int(0), c_int(0))) != 0:
+            print(f"error resetting the roi start {self.i} {result}")
+            return
+
+        # assert self.lib.ASIGetROIFormat(self.i, byref(width), byref(height), byref(binning), byref(img_type)) == 0
+        # print(f"updated roi is {width}, {height}, {binning}, {img_type}")
+
+        v = c_long(exposure * 1000000)
+        #print(f"DEBUG setting exposure to {v}")
+        if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_EXPOSURE, v, ASI_BOOL.ASI_FALSE)) != 0:
+            print(f"error setting exposure {self.i} {result}")
+            return
+
+        v = c_long(gain)
+        #print(f"DEBUG setting gain to {v}")
+        if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_GAIN, v, ASI_BOOL.ASI_FALSE)) != 0:
+            print(f"error setting gain {self.i} {result}")
+            return
+
+        # FIXME user configurable offset
+        v = c_long(50)
+        if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_BRIGHTNESS, v, ASI_BOOL.ASI_FALSE)) != 0:
+            print(f"error setting offset (brightness) {self.i} {result}")
+            return
+
+        # v = c_long(40)
+        # if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_BANDWIDTHOVERLOAD, v, ASI_BOOL.ASI_FALSE)) != 0:
+        #     print(f"error setting bandwidth {self.i} {result}")
+        #     return
+
+        if (result := self.lib.ASIStartExposure(self.i)) != 0:
+            print(f"error starting the capture {self.i} {result}")
+            return
+
+        return True
+
+    def capture_wait(self):
+        status = c_int()
+
+        # cooler = c_long()
+        # if (result := self.lib.ASIGetControlValue(self.i, ASI_CONTROL_TYPE.ASI_COOLER_ON, byref(cooler), byref(c_int(ASI_BOOL.ASI_FALSE)))) != 0:
+        #     print(f"error getting cooler value during wait")
+        # print(f"cooling is {cooler.value}")
+
+        if (result := self.lib.ASIGetExpStatus(self.i, byref(status)) != 0):
+            print(f"error getting exposure status {self.i} {result}")
+            return
+        return status.value
+
+    # could allow reusing buffers...
+    def capture_finish(self):
+        width = self.info.MaxWidth
+        height = self.info.MaxHeight
+        buf_len = width * height * 2 # RAW16
+        buf = (c_ubyte * buf_len)()
+        if (result := self.lib.ASIGetDataAfterExp(self.i, buf, buf_len)) != 0:
+            print(f"error getting data {self.i} {result}")
+            return
+
+        if (result := self.lib.ASIStopExposure(self.i)) != 0:
+            print(f"failed to stop the exposure")
+
+        img_array = np.ctypeslib.as_array(buf)
+        return img_array.view(np.uint16).reshape(height, width)
+
+class EFW_INFO(Structure):
+    _fields_ = [
+        ("ID", c_int),
+        ("Name", c_char * 64),
+        ("slotNum", c_int),
+    ]
+
+    def name(self):
+        return self.Name.decode('utf-8', errors='ignore').rstrip('\x00')
+
+    # the name always comes back as EFW for the EFWmini
+    def identifier(self):
+        if self.name() == "EFW" and self.slotNum == 5:
+            return "ZWO EFWmini"
+        return f"ZWO {self.name()} ({self.slotNum} slots)"
+
+class EfwFilter:
+    def __init__(self):
+        arch = get_normalized_arch()
+        #self.dep = CDLL("libudev.so")
+        self.lib = CDLL(f"lib/{arch}/libEFWFilter.so.1.7")
+
+        self.lib.EFWGetNum.restype = c_int
+        self.lib.EFWGetNum.argtypes = []
+
+        self.lib.EFWGetID.restype = c_int  # EFW_ERROR_CODE
+        self.lib.EFWGetID.argtypes = [c_int, POINTER(c_int)]
+
+        self.lib.EFWGetProperty.restype = c_int  # EFW_ERROR_CODE
+        self.lib.EFWGetProperty.argtypes = [c_int, POINTER(EFW_INFO)]
+
+        self.lib.EFWOpen.restype = c_int  # EFW_ERROR_CODE
+        self.lib.EFWOpen.argtypes = [c_int]
+
+        self.lib.EFWGetPosition.restype = c_int  # EFW_ERROR_CODE
+        self.lib.EFWGetPosition.argtypes = [c_int, POINTER(c_int)]
+
+        self.lib.EFWSetPosition.restype = c_int  # EFW_ERROR_CODE
+        self.lib.EFWSetPosition.argtypes = [c_int, c_int]
+
+        self.lib.EFWSetDirection.restype = c_int  # EFW_ERROR_CODE
+        self.lib.EFWSetDirection.argtypes = [c_int, c_bool]
+
+        self.lib.EFWGetDirection.restype = c_int  # EFW_ERROR_CODE
+        self.lib.EFWGetDirection.argtypes = [c_int, POINTER(c_bool)]
+
+        self.lib.EFWClose.restype = c_int  # EFW_ERROR_CODE
+        self.lib.EFWClose.argtypes = [c_int]
+
+        self.lib.EFWGetProductIDs.restype = c_int  # returns length of array
+        self.lib.EFWGetProductIDs.argtypes = [POINTER(c_int)]
+
+        self.lib.EFWCalibrate.restype = c_int  # EFW_ERROR_CODE
+        self.lib.EFWCalibrate.argtypes = [c_int]
+
+    # returns objects with fields: name, slots
+    def wheels(self):
+        num_wheels = self.lib.EFWGetNum()
+        print(f"seen {num_wheels} wheels")
+        wheels = []
+        for i in range(num_wheels):
+            wheel = Box()
+            # EFWGetID is junk, just ignore it.
+
+            # annoyingly, EFWGetProperty only works if we first open the EFW.
+            # we assume the user doesn't disconnect it.
+            #
+            # set/get position cause it to move, so don't do that.
+            # calibrate should be unnecessary because it happens on startup.
+            #
+            # set/get/calibrate are all async.
+            result = self.lib.EFWOpen(i)
+            if result != 0:
+                print(f"EFWOpen failed for index {i} with error code {result}")
+                continue
+            info = EFW_INFO()
+            result = self.lib.EFWGetProperty(i, byref(info))
+            if result != 0:
+                print(f"EFWGetProperty failed for index {i} with error code {result}")
+                continue
+            wheel.name = info.identifier()
+            wheel.slots = info.slotNum
+            wheels.append(wheel)
+
+        return wheels
+
+    # finds the first matching wheel
+    def find_wheel(self, name):
+        num_wheels = self.lib.EFWGetNum()
+        for i in range(num_wheels):
+            result = self.lib.EFWOpen(i)
+            if result != 0:
+                print(f"EFWOpen failed for index {i} with error code {result}")
+                continue
+            info = EFW_INFO()
+            result = self.lib.EFWGetProperty(i, byref(info))
+            if result != 0:
+                print(f"EFWGetProperty failed for index {i} with error code {result}")
+                continue
+
+            if info.identifier() == name:
+                print(f"found wheel {name}")
+                return Wheel(self.lib, info)
+        print(f"failed to find wheel {name}")
+
+class Wheel:
+    def __init__(self, lib, info):
+        self.lib = lib
+        self.info = info
+
+    def calibrate(self):
+        i = self.info.ID
+        result = self.lib.EFWCalibrate(i)
+        if result != 0:
+            print(f"EFWCalibrate failed for wheel {i} with error code {result}")
+
+def get_normalized_arch():
+    raw = platform.machine().lower()
+    if raw in ("x86_64", "amd64"):
+        return "x64"
+    elif raw in ("aarch64", "arm64"):
+        return "armv8"
+    else:
+        return "unknown"
+
+# collected by chatgpt from forums
+def get_unity_gain(camera_name):
+    model_map = {
+        "ASI1600MM": 139,
+        "ASI1600MC": 139,
+        "ASI294MM": 120,
+        "ASI294MC": 120,
+        "ASI183MM": 111,
+        "ASI183MC": 111,
+        "ASI174MM": 139,
+        "ASI174MC": 139,
+        "ASI533MM": 100,
+        "ASI533MC": 100,
+        "ASI2600MM": 100,
+        "ASI2600MC": 100,
+        "ASI6200MM": 100,
+        "ASI6200MC": 100,
+        "ASI2400MC": 100,
+        "ASI071MC": 90,
+        "ASI678MC": 90,
+        "ASI678MM": 90,
+        "ASI585MC": 180,
+        "ASI462MC": 230,
+        "ASI482MC": 160,
+        "ASI432MM": 160,
+        "ASI224MC": 252
+    }
+    for model, gain in model_map.items():
+        if model in camera_name:
+            return gain
+    return None

@@ -1,0 +1,15 @@
+[Unit]
+Description=LuddCam
+After=default.target
+
+[Service]
+Environment=SDL_VIDEODRIVER=kmsdrm
+Environment=SDL_AUDIODRIVER=dummy
+Environment=SDL_NOMOUSE=1
+Environment=PYTHONUNBUFFERED=1
+WorkingDirectory=%h/luddcam
+ExecStart=/bin/bash -c "devmon > ../devmon.log 2>&1 & exec python3 luddcam.py > ../luddcam.log 2>&1"
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
