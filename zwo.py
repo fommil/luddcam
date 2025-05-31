@@ -293,15 +293,6 @@ class Camera:
                 print(f"error getting camera caps {i}, {c} = {result}")
                 continue
             self.controls[caps.ControlType] = caps
-            # print(f"DEBUG: control type {caps.ControlType} is {caps.name()}")
-            # print(f"  Name:           {caps.Name.decode(errors='ignore')}")
-            # print(f"  Description:    {caps.Description.decode(errors='ignore')}")
-            # print(f"  ControlType:    {caps.ControlType}")
-            # print(f"  MinValue:       {caps.MinValue}")
-            # print(f"  MaxValue:       {caps.MaxValue}")
-            # print(f"  DefaultValue:   {caps.DefaultValue}")
-            # print(f"  IsWritable:     {'Yes' if caps.IsWritable else 'No'}")
-            # print(f"  Auto Supported: {'Yes' if caps.IsAutoSupported else 'No'}")
 
         self.is_cooled = ASI_CONTROL_TYPE.ASI_COOLER_ON in self.controls
 
@@ -351,6 +342,8 @@ class Camera:
             return
 
     def capture_start(self, gain, exposure):
+        print(f"capture_start for gain={gain}, exposure={exposure}")
+
         # if we don't do this then we can't even create the first one
         if (result := self.lib.ASIStopExposure(self.i)) != 0:
             print(f"failed to stop (potentially stale) exposures")
@@ -390,16 +383,16 @@ class Camera:
             print(f"error setting gain {self.i} {result}")
             return
 
-        # FIXME user configurable offset
-        v = c_long(50)
-        if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_BRIGHTNESS, v, ASI_BOOL.ASI_FALSE)) != 0:
-            print(f"error setting offset (brightness) {self.i} {result}")
-            return
+        # # FIXME user configurable offset
+        # v = c_long(50)
+        # if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_BRIGHTNESS, v, ASI_BOOL.ASI_FALSE)) != 0:
+        #     print(f"error setting offset (brightness) {self.i} {result}")
+        #     return
 
-        v = c_long(40)
-        if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_BANDWIDTHOVERLOAD, v, ASI_BOOL.ASI_FALSE)) != 0:
-            print(f"error setting bandwidth {self.i} {result}")
-            return
+        # v = c_long(40)
+        # if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_BANDWIDTHOVERLOAD, v, ASI_BOOL.ASI_FALSE)) != 0:
+        #     print(f"error setting bandwidth {self.i} {result}")
+        #     return
 
         if (result := self.lib.ASIStartExposure(self.i)) != 0:
             print(f"error starting the capture {self.i} {result}")
@@ -415,9 +408,9 @@ class Camera:
         #     print(f"error getting cooler value during wait")
         # print(f"cooling is {cooler.value}")
 
-        if (result := self.lib.ASIGetExpStatus(self.i, byref(status)) != 0):
-            print(f"error getting exposure status {self.i} {result}")
-            return
+        if (result := self.lib.ASIGetExpStatus(self.i, byref(status))) != 0:
+            print(f"error getting exp status for {self.i} ASI_ERROR_CODE={result}")
+            return -1
         return status.value
 
     # could allow reusing buffers...

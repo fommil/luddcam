@@ -166,7 +166,7 @@ def main():
                     gain = prefs.gain
                     print(f"temp is {camera.temp()}C")
                     print(f"cooler is {camera.cooler()}%")
-                    print(f"starting a capture on {camera.name} with gain {gain}")
+                    #print(f"starting a capture on {camera.name} with gain {gain}")
                     if camera.capture_start(gain, 1):
                         capturing = True
                 else:
