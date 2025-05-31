@@ -58,7 +58,13 @@ class ASI_ERROR_CODE(IntEnum):
     ASI_ERROR_VIDEO_MODE_ACTIVE = 14
     ASI_ERROR_EXPOSURE_IN_PROGRESS = 15
     ASI_ERROR_GENERAL_ERROR = 16      # general error, eg: value is out of valid range
-    ASI_ERROR_END = 17
+    ASI_ERROR_INVALID_MODE = 17       # the current mode is wrong
+    ASI_ERROR_GPS_NOT_SUPPORTED = 18  # this camera do not support GPS
+    ASI_ERROR_GPS_VER_ERR = 19        # the FPGA GPS ver is too low
+    ASI_ERROR_GPS_FPGA_ERR = 20       # failed to read or write data to FPGA
+    ASI_ERROR_GPS_PARAM_OUT_OF_RANGE = 21 # start line or end line out of range, should make them between 0 ~ MaxHeight - 1
+    ASI_ERROR_GPS_DATA_INVALID = 22   # GPS has not yet found the satellite or FPGA cannot read GPS data
+    ASI_ERROR_END = 23
 
 class ASI_BOOL(IntEnum):
     ASI_FALSE = 0
@@ -70,14 +76,14 @@ class ASI_CONTROL_TYPE(IntEnum):
     ASI_GAMMA = 2                   # gamma with range 1 to 100 (nominally 50)
     ASI_WB_R = 3                    # red component of white balance
     ASI_WB_B = 4                    # blue component of white balance
-    ASI_BRIGHTNESS = 5              # pixel value offset (a bias, not a scale factor)
+    ASI_OFFSET = 5              # pixel value offset (a bias, not a scale factor)
     ASI_BANDWIDTHOVERLOAD = 6       # the total data transfer rate percentage
     ASI_OVERCLOCK = 7               # over clock
     ASI_TEMPERATURE = 8             # sensor temperature,10 times the actual temperature
     ASI_FLIP = 9                    # image flip
     ASI_AUTO_MAX_GAIN = 10          # maximum gain when auto adjust
     ASI_AUTO_MAX_EXP = 11           # maximum exposure time when auto adjust，unit is microseconds
-    ASI_AUTO_MAX_BRIGHTNESS = 12    # target brightness when auto adjust
+    ASI_AUTO_TARGET_BRIGHTNESS = 12    # target brightness when auto adjust
     ASI_HARDWARE_BIN = 13           # hardware binning of pixels
     ASI_HIGH_SPEED_MODE = 14        # high speed mode
     ASI_COOLER_POWER_PERC = 15      # cooler power percent (only cool camera)
@@ -87,6 +93,13 @@ class ASI_CONTROL_TYPE(IntEnum):
     ASI_FAN_ON = 19                 # only cooled camera has fan
     ASI_PATTERN_ADJUST = 20         # currently only supported by 1600 mono camera
     ASI_ANTI_DEW_HEATER = 21
+    ASI_FAN_ADJUST = 22
+    ASI_PWRLED_BRIGNT = 23
+    ASI_USBHUB_RESET = 24
+    ASI_GPS_SUPPORT = 25
+    ASI_GPS_START_LINE = 26
+    ASI_GPS_END_LINE = 27
+    ASI_ROLLING_INTERVAL = 28
 
 class ASI_EXPOSURE_STATUS(IntEnum):
     ASI_EXP_IDLE = 0     # idle, ready to start exposure
@@ -143,15 +156,6 @@ class AsiCamera2:
         self.lib.ASIGetNumOfConnectedCameras.restype = c_int
         self.lib.ASIGetNumOfConnectedCameras.argtypes = []
 
-        self.lib.ASIGetProductIDs.restype = c_int
-        self.lib.ASIGetProductIDs.argtypes = [POINTER(c_int)]
-
-        self.lib.ASIGetSDKVersion.restype = c_char_p
-        self.lib.ASIGetSDKVersion.argtypes = []
-
-        self.lib.ASICameraCheck.restype = c_int  # ASI_BOOL
-        self.lib.ASICameraCheck.argtypes = [c_int, c_int]
-
         self.lib.ASIGetCameraProperty.restype = c_int
         self.lib.ASIGetCameraProperty.argtypes = [c_void_p, c_int]  # ASI_CAMERA_INFO*, int
 
@@ -179,41 +183,17 @@ class AsiCamera2:
         self.lib.ASISetROIFormat.restype = c_int
         self.lib.ASISetROIFormat.argtypes = [c_int, c_int, c_int, c_int, c_int]
 
-        self.lib.ASIGetROIFormat.restype = c_int
-        self.lib.ASIGetROIFormat.argtypes = [c_int, POINTER(c_int), POINTER(c_int), POINTER(c_int), POINTER(c_int)]
-
         self.lib.ASISetStartPos.restype = c_int
         self.lib.ASISetStartPos.argtypes = [c_int, c_int, c_int]
 
-        self.lib.ASIGetStartPos.restype = c_int
-        self.lib.ASIGetStartPos.argtypes = [c_int, POINTER(c_int), POINTER(c_int)]
+        # self.lib.ASIPulseGuideOn.restype = c_int
+        # self.lib.ASIPulseGuideOn.argtypes = [c_int, c_int]
 
-        self.lib.ASIGetDroppedFrames.restype = c_int
-        self.lib.ASIGetDroppedFrames.argtypes = [c_int, POINTER(c_int)]
-
-        self.lib.ASIEnableDarkSubtract.restype = c_int
-        self.lib.ASIEnableDarkSubtract.argtypes = [c_int, c_char_p]
-
-        self.lib.ASIDisableDarkSubtract.restype = c_int
-        self.lib.ASIDisableDarkSubtract.argtypes = [c_int]
-
-        self.lib.ASIStartVideoCapture.restype = c_int
-        self.lib.ASIStartVideoCapture.argtypes = [c_int]
-
-        self.lib.ASIStopVideoCapture.restype = c_int
-        self.lib.ASIStopVideoCapture.argtypes = [c_int]
-
-        self.lib.ASIGetVideoData.restype = c_int
-        self.lib.ASIGetVideoData.argtypes = [c_int, POINTER(c_ubyte), c_long, c_int]
-
-        self.lib.ASIPulseGuideOn.restype = c_int
-        self.lib.ASIPulseGuideOn.argtypes = [c_int, c_int]
-
-        self.lib.ASIPulseGuideOff.restype = c_int
-        self.lib.ASIPulseGuideOff.argtypes = [c_int, c_int]
+        # self.lib.ASIPulseGuideOff.restype = c_int
+        # self.lib.ASIPulseGuideOff.argtypes = [c_int, c_int]
 
         self.lib.ASIStartExposure.restype = c_int
-        self.lib.ASIStartExposure.argtypes = [c_int]
+        self.lib.ASIStartExposure.argtypes = [c_int, c_int]
 
         self.lib.ASIStopExposure.restype = c_int
         self.lib.ASIStopExposure.argtypes = [c_int]
@@ -224,23 +204,8 @@ class AsiCamera2:
         self.lib.ASIGetDataAfterExp.restype = c_int
         self.lib.ASIGetDataAfterExp.argtypes = [c_int, POINTER(c_ubyte), c_long]
 
-        self.lib.ASIGetID.restype = c_int
-        self.lib.ASIGetID.argtypes = [c_int, c_void_p]  # ASI_ID*
-
-        self.lib.ASISetID.restype = c_int
-        self.lib.ASISetID.argtypes = [c_int, c_void_p]  # ASI_ID
-
-        self.lib.ASIGetCameraSupportMode.restype = c_int
-        self.lib.ASIGetCameraSupportMode.argtypes = [c_int, c_void_p]  # ASI_SUPPORTED_MODE*
-
-        self.lib.ASIGetCameraMode.restype = c_int
-        self.lib.ASIGetCameraMode.argtypes = [c_int, POINTER(c_int)]
-
         self.lib.ASISetCameraMode.restype = c_int
         self.lib.ASISetCameraMode.argtypes = [c_int, c_int]
-
-        self.lib.ASISendSoftTrigger.restype = c_int
-        self.lib.ASISendSoftTrigger.argtypes = [c_int, c_int]
 
     def cameras(self):
         num_cameras = self.lib.ASIGetNumOfConnectedCameras()
@@ -304,12 +269,13 @@ class Camera:
             self.gain_default = caps.DefaultValue
             self.gain_unity = get_unity_gain(self.name)
 
+        if (self.info.IsTriggerCam == ASI_BOOL.ASI_TRUE):
+            if (result := self.lib.ASISetCameraMode(self.i, ASI_CAMERA_MODE.ASI_MODE_NORMAL)) != 0:
+                print(f"error setting camera to snap mode")
+                return
         # if (result := self.lib.ASIOpenCamera(self.i)) != 0:
-        #     print(f"error opening camera {self.i} {result}")
+        #     print(f"error re-opening camera {i} = {result}")
         #     return
-        if (result := self.lib.ASISetCameraMode(self.i, ASI_CAMERA_MODE.ASI_MODE_NORMAL)) != 0:
-            print(f"error setting camera to snap mode")
-            return
         if (result := self.lib.ASIInitCamera(self.i)) != 0:
             print(f"error init camera {self.i} {result}")
             return
@@ -330,11 +296,11 @@ class Camera:
         print(f"setting the target cooling of {self.name} to {temp}")
         # print("ASI_FAN_ON supported:", ASI_CONTROL_TYPE.ASI_FAN_ON in self.controls)
         if ASI_CONTROL_TYPE.ASI_FAN_ON in self.controls:
-            if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_FAN_ON, ASI_BOOL.ASI_TRUE, ASI_BOOL.ASI_FALSE)) != 0:
+            if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_FAN_ON, c_long(ASI_BOOL.ASI_TRUE), ASI_BOOL.ASI_FALSE)) != 0:
                 print(f"error when enabling the fan")
                 return
         #print("ASI_COOLER_ON supported:", ASI_CONTROL_TYPE.ASI_COOLER_ON in self.controls)
-        if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_COOLER_ON, ASI_BOOL.ASI_TRUE, ASI_BOOL.ASI_FALSE)) != 0:
+        if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_COOLER_ON, c_long(ASI_BOOL.ASI_TRUE), ASI_BOOL.ASI_FALSE)) != 0:
             print(f"error when enabling the cooling")
             return
         if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_TARGET_TEMP, c_long(temp), ASI_BOOL.ASI_FALSE)) != 0:
@@ -372,18 +338,18 @@ class Camera:
         # print(f"updated roi is {width}, {height}, {binning}, {img_type}")
 
         v = c_long(exposure * 1000000)
-        #print(f"DEBUG setting exposure to {v}")
+        # print(f"DEBUG setting exposure to {v}")
         if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_EXPOSURE, v, ASI_BOOL.ASI_FALSE)) != 0:
             print(f"error setting exposure {self.i} {result}")
             return
 
         v = c_long(gain)
-        #print(f"DEBUG setting gain to {v}")
+        # print(f"DEBUG setting gain to {v}")
         if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_GAIN, v, ASI_BOOL.ASI_FALSE)) != 0:
             print(f"error setting gain {self.i} {result}")
             return
 
-        # # FIXME user configurable offset
+        # FIXME user configurable offset
         # v = c_long(50)
         # if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_BRIGHTNESS, v, ASI_BOOL.ASI_FALSE)) != 0:
         #     print(f"error setting offset (brightness) {self.i} {result}")
@@ -394,7 +360,7 @@ class Camera:
         #     print(f"error setting bandwidth {self.i} {result}")
         #     return
 
-        if (result := self.lib.ASIStartExposure(self.i)) != 0:
+        if (result := self.lib.ASIStartExposure(self.i, ASI_BOOL.ASI_FALSE)) != 0:
             print(f"error starting the capture {self.i} {result}")
             return
 

@@ -172,7 +172,7 @@ class Menu:
                 self.settings.camera = None
                 self.camera = None
                 return
-            print(f"set camera {c}")
+            print(f"set camera {c.name}")
             self.settings.camera = c.name
             self.camera = c
             prefs = self.camera_settings()
@@ -218,7 +218,7 @@ class Menu:
                 self.settings.guide = None
                 self.guide = None
                 return
-            print(f"set guide {c}")
+            print(f"set guide {c.name}")
             self.settings.guide = c.name
             self.guide = c
         if not self.guides:
@@ -251,7 +251,7 @@ class Menu:
                 self.settings.wheel = None
                 self.wheel = None
                 return
-            print(f"set wheel {w}")
+            print(f"set wheel {w.name}")
             self.settings.wheel = w.name
             self.wheel = w
             prefs = self.wheel_settings()
