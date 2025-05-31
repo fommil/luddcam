@@ -219,7 +219,7 @@ class AsiCamera2:
 class Camera:
     def __init__(self, lib, i):
         self.lib = lib
-        self.i = c_int(i)
+        self.i = i
         self.info = ASI_CAMERA_INFO()
         self.name = None
         self.is_cooled = None
@@ -296,14 +296,14 @@ class Camera:
         print(f"setting the target cooling of {self.name} to {temp}")
         # print("ASI_FAN_ON supported:", ASI_CONTROL_TYPE.ASI_FAN_ON in self.controls)
         if ASI_CONTROL_TYPE.ASI_FAN_ON in self.controls:
-            if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_FAN_ON, c_long(ASI_BOOL.ASI_TRUE), ASI_BOOL.ASI_FALSE)) != 0:
+            if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_FAN_ON, ASI_BOOL.ASI_TRUE, ASI_BOOL.ASI_FALSE)) != 0:
                 print(f"error when enabling the fan")
                 return
         #print("ASI_COOLER_ON supported:", ASI_CONTROL_TYPE.ASI_COOLER_ON in self.controls)
-        if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_COOLER_ON, c_long(ASI_BOOL.ASI_TRUE), ASI_BOOL.ASI_FALSE)) != 0:
+        if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_COOLER_ON, ASI_BOOL.ASI_TRUE, ASI_BOOL.ASI_FALSE)) != 0:
             print(f"error when enabling the cooling")
             return
-        if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_TARGET_TEMP, c_long(temp), ASI_BOOL.ASI_FALSE)) != 0:
+        if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_TARGET_TEMP, temp, ASI_BOOL.ASI_FALSE)) != 0:
             print(f"error when setting the target temperature")
             return
 
@@ -311,9 +311,9 @@ class Camera:
         print(f"capture_start for gain={gain}, exposure={exposure}")
 
         # if we don't do this then we can't even create the first one
-        if (result := self.lib.ASIStopExposure(self.i)) != 0:
-            print(f"failed to stop (potentially stale) exposures")
-            return
+        # if (result := self.lib.ASIStopExposure(self.i)) != 0:
+        #     print(f"failed to stop (potentially stale) exposures")
+        #     return
 
         width = int(self.info.MaxWidth)
         height = int(self.info.MaxHeight)
@@ -327,35 +327,35 @@ class Camera:
         # assert img_type.value == ASI_IMG_TYPE.ASI_IMG_RAW16
 
         #print(f"DEBUG: starting a capture with w={width},h={height}")
-        if (result := self.lib.ASISetROIFormat(self.i, c_int(width), c_int(height), c_int(1), ASI_IMG_TYPE.ASI_IMG_RAW16)) != 0:
+        if (result := self.lib.ASISetROIFormat(self.i, width, height, 1, ASI_IMG_TYPE.ASI_IMG_RAW16)) != 0:
             print(f"error setting image format {self.i} {result}")
             return
-        if (result := self.lib.ASISetStartPos(self.i, c_int(0), c_int(0))) != 0:
+        if (result := self.lib.ASISetStartPos(self.i, 0, 0)) != 0:
             print(f"error resetting the roi start {self.i} {result}")
             return
 
         # assert self.lib.ASIGetROIFormat(self.i, byref(width), byref(height), byref(binning), byref(img_type)) == 0
         # print(f"updated roi is {width}, {height}, {binning}, {img_type}")
 
-        v = c_long(exposure * 1000000)
+        v = int(exposure * 1000000)
         # print(f"DEBUG setting exposure to {v}")
         if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_EXPOSURE, v, ASI_BOOL.ASI_FALSE)) != 0:
             print(f"error setting exposure {self.i} {result}")
             return
 
-        v = c_long(gain)
+        v = int(gain)
         # print(f"DEBUG setting gain to {v}")
         if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_GAIN, v, ASI_BOOL.ASI_FALSE)) != 0:
             print(f"error setting gain {self.i} {result}")
             return
 
         # FIXME user configurable offset
-        # v = c_long(50)
+        # v = int(50)
         # if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_BRIGHTNESS, v, ASI_BOOL.ASI_FALSE)) != 0:
         #     print(f"error setting offset (brightness) {self.i} {result}")
         #     return
 
-        # v = c_long(40)
+        # v = int(40)
         # if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_BANDWIDTHOVERLOAD, v, ASI_BOOL.ASI_FALSE)) != 0:
         #     print(f"error setting bandwidth {self.i} {result}")
         #     return
@@ -368,12 +368,6 @@ class Camera:
 
     def capture_wait(self):
         status = c_int()
-
-        # cooler = c_long()
-        # if (result := self.lib.ASIGetControlValue(self.i, ASI_CONTROL_TYPE.ASI_COOLER_ON, byref(cooler), byref(c_int(ASI_BOOL.ASI_FALSE)))) != 0:
-        #     print(f"error getting cooler value during wait")
-        # print(f"cooling is {cooler.value}")
-
         if (result := self.lib.ASIGetExpStatus(self.i, byref(status))) != 0:
             print(f"error getting exp status for {self.i} ASI_ERROR_CODE={result}")
             return -1
@@ -530,3 +524,5 @@ def get_unity_gain(camera_name):
         if model in camera_name:
             return gain
     return None
+
+# FIXME define a minimal main here to test exposure code
