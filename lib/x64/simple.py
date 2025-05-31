@@ -72,8 +72,6 @@ time.sleep(1)
 asi.ASISetStartPos(cam_id, 0, 0)
 time.sleep(1)
 
-asi.ASISetControlValue(cam_id, 14, 1, 0)
-
 # Configure settings
 asi.ASISetControlValue(cam_id, ASI_EXPOSURE, 1000000, 0)  # 1 second
 #asi.ASISetControlValue(cam_id, ASI_GAIN, 0, 0)
