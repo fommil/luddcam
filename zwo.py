@@ -132,6 +132,35 @@ class ASI_CAMERA_INFO(Structure):
     def name(self):
         return self.Name.decode('utf-8', errors='ignore').rstrip('\x00')
 
+    def __str__(self):
+        bins = [str(b) for b in self.SupportedBins if b > 0]
+        formats = {
+            0: "RAW8",
+            1: "RGB24",
+            2: "RAW16",
+            3: "Y8"
+        }
+        video_formats = [formats.get(f, f"Unknown({f})") for f in self.SupportedVideoFormat if f >= 0]
+
+        return (
+            f"Camera Name: {self.Name.decode('utf-8').rstrip(chr(0))}\n"
+            f"  ID: {self.CameraID}\n"
+            f"  Resolution: {self.MaxWidth} × {self.MaxHeight}\n"
+            f"  Color: {'Yes' if self.IsColorCam else 'No'}\n"
+            f"  Bayer Pattern: {self.BayerPattern}\n"
+            f"  Supported Binning: {', '.join(bins)}\n"
+            f"  Supported Video Formats: {', '.join(video_formats)}\n"
+            f"  Pixel Size: {self.PixelSize:.2f} µm\n"
+            f"  Mechanical Shutter: {'Yes' if self.MechanicalShutter else 'No'}\n"
+            f"  ST4 Port: {'Yes' if self.ST4Port else 'No'}\n"
+            f"  Cooled: {'Yes' if self.IsCoolerCam else 'No'}\n"
+            f"  USB3 Host: {'Yes' if self.IsUSB3Host else 'No'}\n"
+            f"  USB3 Camera: {'Yes' if self.IsUSB3Camera else 'No'}\n"
+            f"  Elec/ADU: {self.ElecPerADU:.2f}\n"
+            f"  Bit Depth: {self.BitDepth} bit\n"
+            f"  Trigger Capable: {'Yes' if self.IsTriggerCam else 'No'}"
+        )
+
 class ASI_CONTROL_CAPS(Structure):
     _fields_ = [
         ("Name", c_char * 64),
@@ -151,13 +180,14 @@ class ASI_CONTROL_CAPS(Structure):
 class AsiCamera2:
     def __init__(self):
         arch = get_normalized_arch()
+        print(f"arch = {arch}")
         self.lib = CDLL(f"lib/{arch}/libASICamera2.so.1.37")
 
         self.lib.ASIGetNumOfConnectedCameras.restype = c_int
         self.lib.ASIGetNumOfConnectedCameras.argtypes = []
 
         self.lib.ASIGetCameraProperty.restype = c_int
-        self.lib.ASIGetCameraProperty.argtypes = [c_void_p, c_int]  # ASI_CAMERA_INFO*, int
+        self.lib.ASIGetCameraProperty.argtypes = [POINTER(ASI_CAMERA_INFO), c_int]
 
         self.lib.ASIOpenCamera.restype = c_int
         self.lib.ASIOpenCamera.argtypes = [c_int]
@@ -230,6 +260,7 @@ class Camera:
             print(f"error getting camera properties {i} = {result}")
             return
         self.name = self.info.name()
+        print(f"{self.info}")
 
         self.guide = bool(self.info.ST4Port)
         if self.name == "ZWO ASI1600MM Pro":
@@ -258,6 +289,7 @@ class Camera:
                 print(f"error getting camera caps {i}, {c} = {result}")
                 continue
             self.controls[caps.ControlType] = caps
+            print(f"CAPS {caps.name()} = {caps.DefaultValue}")
 
         self.is_cooled = ASI_CONTROL_TYPE.ASI_COOLER_ON in self.controls
 
@@ -269,13 +301,11 @@ class Camera:
             self.gain_default = caps.DefaultValue
             self.gain_unity = get_unity_gain(self.name)
 
+        print(f"is trigger cam? {self.info.IsTriggerCam == ASI_BOOL.ASI_TRUE}")
         if (self.info.IsTriggerCam == ASI_BOOL.ASI_TRUE):
             if (result := self.lib.ASISetCameraMode(self.i, ASI_CAMERA_MODE.ASI_MODE_NORMAL)) != 0:
                 print(f"error setting camera to snap mode")
                 return
-        # if (result := self.lib.ASIOpenCamera(self.i)) != 0:
-        #     print(f"error re-opening camera {i} = {result}")
-        #     return
         if (result := self.lib.ASIInitCamera(self.i)) != 0:
             print(f"error init camera {self.i} {result}")
             return
@@ -315,18 +345,22 @@ class Camera:
         #     print(f"failed to stop (potentially stale) exposures")
         #     return
 
-        width = int(self.info.MaxWidth)
-        height = int(self.info.MaxHeight)
+        width = self.info.MaxWidth
+        height = self.info.MaxHeight
         # print(f"max dims are {width}, {height}")
-        # width, height, binning, img_type = c_int(), c_int(), c_int(), c_int()
-        # assert self.lib.ASIGetROIFormat(self.i, byref(width), byref(height), byref(binning), byref(img_type)) == 0
-        # print(f"initial roi was {width}, {height}, {binning}, {img_type}")
+        width, height, binning, img_type = c_int(), c_int(), c_int(), c_int()
+        assert self.lib.ASIGetROIFormat(self.i, byref(width), byref(height), byref(binning), byref(img_type)) == 0
+        print(f"initial roi was {width}, {height}, {binning}, {img_type}")
         # assert width.value == self.info.MaxWidth
         # assert height.value == self.info.MaxHeight
         # assert binning.value == 1
         # assert img_type.value == ASI_IMG_TYPE.ASI_IMG_RAW16
 
         #print(f"DEBUG: starting a capture with w={width},h={height}")
+        # if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_HIGH_SPEED_MODE, ASI_BOOL.ASI_FALSE, ASI_BOOL.ASI_FALSE)) != 0:
+        #     print(f"error setting high speed mode {self.i} {result}")
+        #     return
+        # FIXME RAW16 is causing everything to fail
         if (result := self.lib.ASISetROIFormat(self.i, width, height, 1, ASI_IMG_TYPE.ASI_IMG_RAW16)) != 0:
             print(f"error setting image format {self.i} {result}")
             return
@@ -351,7 +385,7 @@ class Camera:
 
         # FIXME user configurable offset
         # v = int(50)
-        # if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_BRIGHTNESS, v, ASI_BOOL.ASI_FALSE)) != 0:
+        # if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_OFFSET, v, ASI_BOOL.ASI_FALSE)) != 0:
         #     print(f"error setting offset (brightness) {self.i} {result}")
         #     return
 
@@ -525,4 +559,26 @@ def get_unity_gain(camera_name):
             return gain
     return None
 
-# FIXME define a minimal main here to test exposure code
+# minimal test, check we can make an exposure on a single camera
+if __name__ == '__main__':
+    import time
+
+    api = AsiCamera2()
+    cameras = api.cameras()
+    assert len(cameras) == 1
+    camera = cameras[0]
+
+    camera.cooling(0)
+#    time.sleep(10)
+
+    camera.capture_start(100, 1)
+    while True:
+        status = camera.capture_wait()
+        print(f"status = {status}")
+        if status == ASI_EXPOSURE_STATUS.ASI_EXP_WORKING:
+            time.sleep(0.1)
+            continue
+        else:
+            break
+
+

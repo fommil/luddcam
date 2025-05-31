@@ -1,5 +1,5 @@
 import ctypes
-from ctypes import c_int, c_char, c_long, c_ubyte, c_ulong, POINTER, Structure, byref
+from ctypes import c_int, c_char, c_long, c_ubyte, c_ulong, POINTER, Structure, byref, c_double, c_float
 import time
 
 # Load shared library
@@ -15,22 +15,22 @@ class ASI_CAMERA_INFO(Structure):
     _fields_ = [
         ('Name', c_char * 64),
         ('CameraID', c_int),
-        ('MaxHeight', c_int),
-        ('MaxWidth', c_int),
+        ('MaxHeight', c_long),
+        ('MaxWidth', c_long),
         ('IsColorCam', c_int),
         ('BayerPattern', c_int),
         ('SupportedBins', c_int * 16),
         ('SupportedVideoFormat', c_int * 8),
-        ('PixelSize', ctypes.c_double),
+        ('PixelSize', c_double),
         ('MechanicalShutter', c_int),
         ('ST4Port', c_int),
         ('IsCoolerCam', c_int),
         ('IsUSB3Host', c_int),
         ('IsUSB3Camera', c_int),
-        ('ElecPerADU', ctypes.c_float),
+        ('ElecPerADU', c_float),
         ('BitDepth', c_int),
         ('IsTriggerCam', c_int),
-        ('Unused', c_int * 16),
+        ('Unused', c_char * 16)
     ]
 
 # Function prototypes
@@ -58,16 +58,27 @@ cam_id = 0
 asi.ASIOpenCamera(cam_id)
 asi.ASIInitCamera(cam_id)
 
-# Configure settings
-asi.ASISetControlValue(cam_id, ASI_EXPOSURE, 1000000, 0)  # 1 second
-#asi.ASISetControlValue(cam_id, ASI_GAIN, 100, 0)
-#asi.ASISetControlValue(cam_id, ASI_BANDWIDTHOVERLOAD, 40, 0)
-
 # Set full resolution, no binning, 16-bit
 width = info.MaxWidth
 height = info.MaxHeight
-asi.ASISetROIFormat(cam_id, width, height, 1, ASI_IMG_RAW16)
+print(f"width = {width}, height = {height}")
+asi.ASISetROIFormat(cam_id, width, height, 1, 0)
+time.sleep(1)
+
+# THIS BREAKS IT!
+asi.ASISetROIFormat(cam_id, width, height, 1, 2)
+time.sleep(1)
+
 asi.ASISetStartPos(cam_id, 0, 0)
+time.sleep(1)
+
+asi.ASISetControlValue(cam_id, 14, 1, 0)
+
+# Configure settings
+asi.ASISetControlValue(cam_id, ASI_EXPOSURE, 1000000, 0)  # 1 second
+#asi.ASISetControlValue(cam_id, ASI_GAIN, 0, 0)
+asi.ASISetControlValue(cam_id, ASI_GAIN, 100, 0)
+#asi.ASISetControlValue(cam_id, ASI_BANDWIDTHOVERLOAD, 40, 0)
 
 # Exposure
 asi.ASIStartExposure(cam_id, 0)
@@ -76,11 +87,11 @@ status = c_int()
 while True:
     asi.ASIGetExpStatus(cam_id, byref(status))
     print(f"status = {status.value}")
-    if status.value == ASI_EXP_SUCCESS:
-        break
-    time.sleep(0.02)
+    if status.value == 1:
+        time.sleep(0.02)
+        continue
+    break
 
-print("capture complete")
 asi.ASIStopExposure(cam_id)
 
 # # Retrieve and save image
