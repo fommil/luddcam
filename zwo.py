@@ -242,39 +242,14 @@ class AsiCamera2:
         self.lib.ASISendSoftTrigger.restype = c_int
         self.lib.ASISendSoftTrigger.argtypes = [c_int, c_int]
 
-    # returns a class with fields: name, guide, cooling, gain_{min, max, unity, default}:
     def cameras(self):
         num_cameras = self.lib.ASIGetNumOfConnectedCameras()
         print(f"Number of connected cameras: {num_cameras}")
 
         cameras = []
         for i in range(num_cameras):
-            c = Camera(self.lib, i)
-            camera = Box()
-            camera.name = c.name
-            camera.guide = bool(c.info.ST4Port)
-            if camera.name == "ZWO ASI1600MM Pro":
-                # older models had an ST4 port
-                camera.guide = False
-            camera.cooling = bool(c.info.IsCoolerCam)
-
-            if (caps := c.controls[ASI_CONTROL_TYPE.ASI_GAIN]):
-                camera.gain_min = caps.MinValue
-                camera.gain_max = caps.MaxValue
-                camera.gain_default = caps.DefaultValue
-            camera.gain_unity = get_unity_gain(camera.name)
-
-            cameras.append(camera)
+            cameras.append(Camera(self.lib, i))
         return cameras
-
-    def find_camera(self, name):
-        num_cameras = self.lib.ASIGetNumOfConnectedCameras()
-        print(f"Number of connected cameras: {num_cameras}")
-
-        for i in range(num_cameras):
-            camera = Camera(self.lib, i)
-            if camera.name == name:
-                return camera
 
 class Camera:
     def __init__(self, lib, i):
@@ -282,13 +257,19 @@ class Camera:
         self.i = c_int(i)
         self.info = ASI_CAMERA_INFO()
         self.name = None
-        self.target_temp = None
+        self.is_cooled = None
+        self.has_gain = None
 
         result = self.lib.ASIGetCameraProperty(byref(self.info), self.i)
         if result != 0:
             print(f"error getting camera properties {i} = {result}")
             return
         self.name = self.info.name()
+
+        self.guide = bool(self.info.ST4Port)
+        if self.name == "ZWO ASI1600MM Pro":
+            # older models had an ST4 port
+            self.guide = False
 
         # if (result := self.lib.ASICloseCamera(self.i)) != 0:
         #     print(f"error closing camera {i}, ignoring")
@@ -322,6 +303,16 @@ class Camera:
             # print(f"  IsWritable:     {'Yes' if caps.IsWritable else 'No'}")
             # print(f"  Auto Supported: {'Yes' if caps.IsAutoSupported else 'No'}")
 
+        self.is_cooled = ASI_CONTROL_TYPE.ASI_COOLER_ON in self.controls
+
+        if ASI_CONTROL_TYPE.ASI_GAIN in self.controls:
+            self.has_gain = True
+            caps = self.controls[ASI_CONTROL_TYPE.ASI_GAIN]
+            self.gain_min = caps.MinValue
+            self.gain_max = caps.MaxValue
+            self.gain_default = caps.DefaultValue
+            self.gain_unity = get_unity_gain(self.name)
+
         # if (result := self.lib.ASIOpenCamera(self.i)) != 0:
         #     print(f"error opening camera {self.i} {result}")
         #     return
@@ -345,6 +336,7 @@ class Camera:
         return value.value
 
     def cooling(self, temp):
+        print(f"setting the target cooling of {self.name} to {temp}")
         # print("ASI_FAN_ON supported:", ASI_CONTROL_TYPE.ASI_FAN_ON in self.controls)
         if ASI_CONTROL_TYPE.ASI_FAN_ON in self.controls:
             if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_FAN_ON, ASI_BOOL.ASI_TRUE, ASI_BOOL.ASI_FALSE)) != 0:
@@ -357,8 +349,6 @@ class Camera:
         if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_TARGET_TEMP, c_long(temp), ASI_BOOL.ASI_FALSE)) != 0:
             print(f"error when setting the target temperature")
             return
-
-        self.target_temp = temp
 
     def capture_start(self, gain, exposure):
         # if we don't do this then we can't even create the first one
@@ -377,7 +367,7 @@ class Camera:
         # assert binning.value == 1
         # assert img_type.value == ASI_IMG_TYPE.ASI_IMG_RAW16
 
-        print(f"DEBUG: starting a capture with w={width},h={height}")
+        #print(f"DEBUG: starting a capture with w={width},h={height}")
         if (result := self.lib.ASISetROIFormat(self.i, c_int(width), c_int(height), c_int(1), ASI_IMG_TYPE.ASI_IMG_RAW16)) != 0:
             print(f"error setting image format {self.i} {result}")
             return
@@ -406,10 +396,10 @@ class Camera:
             print(f"error setting offset (brightness) {self.i} {result}")
             return
 
-        # v = c_long(40)
-        # if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_BANDWIDTHOVERLOAD, v, ASI_BOOL.ASI_FALSE)) != 0:
-        #     print(f"error setting bandwidth {self.i} {result}")
-        #     return
+        v = c_long(40)
+        if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_BANDWIDTHOVERLOAD, v, ASI_BOOL.ASI_FALSE)) != 0:
+            print(f"error setting bandwidth {self.i} {result}")
+            return
 
         if (result := self.lib.ASIStartExposure(self.i)) != 0:
             print(f"error starting the capture {self.i} {result}")
@@ -507,60 +497,39 @@ class EfwFilter:
         print(f"seen {num_wheels} wheels")
         wheels = []
         for i in range(num_wheels):
-            wheel = Box()
-            # EFWGetID is junk, just ignore it.
-
-            # annoyingly, EFWGetProperty only works if we first open the EFW.
-            # we assume the user doesn't disconnect it.
-            #
-            # set/get position cause it to move, so don't do that.
-            # calibrate should be unnecessary because it happens on startup.
-            #
-            # set/get/calibrate are all async.
-            result = self.lib.EFWOpen(i)
-            if result != 0:
-                print(f"EFWOpen failed for index {i} with error code {result}")
-                continue
-            info = EFW_INFO()
-            result = self.lib.EFWGetProperty(i, byref(info))
-            if result != 0:
-                print(f"EFWGetProperty failed for index {i} with error code {result}")
-                continue
-            wheel.name = info.identifier()
-            wheel.slots = info.slotNum
-            wheels.append(wheel)
-
+            wheels.append(Wheel(self.lib, i))
         return wheels
 
-    # finds the first matching wheel
-    def find_wheel(self, name):
-        num_wheels = self.lib.EFWGetNum()
-        for i in range(num_wheels):
-            result = self.lib.EFWOpen(i)
-            if result != 0:
-                print(f"EFWOpen failed for index {i} with error code {result}")
-                continue
-            info = EFW_INFO()
-            result = self.lib.EFWGetProperty(i, byref(info))
-            if result != 0:
-                print(f"EFWGetProperty failed for index {i} with error code {result}")
-                continue
-
-            if info.identifier() == name:
-                print(f"found wheel {name}")
-                return Wheel(self.lib, info)
-        print(f"failed to find wheel {name}")
-
 class Wheel:
-    def __init__(self, lib, info):
+    def __init__(self, lib, i):
         self.lib = lib
-        self.info = info
+        self.i = i
+
+        # EFWGetID is junk, just ignore it.
+
+        # annoyingly, EFWGetProperty only works if we first open the EFW.
+        # we assume the user doesn't disconnect it.
+        #
+        # set/get position cause it to move, so don't do that.
+        # calibrate should be unnecessary because it happens on startup.
+        #
+        # set/get/calibrate are all async.
+        result = self.lib.EFWOpen(self.i)
+        if result != 0:
+            print(f"EFWOpen failed for index {self.i} with error code {result}")
+            return
+        self.info = EFW_INFO()
+        result = self.lib.EFWGetProperty(self.i, byref(self.info))
+        if result != 0:
+            print(f"EFWGetProperty failed for index {self.i} with error code {result}")
+            return
+        self.name = self.info.identifier()
+        self.slots = self.info.slotNum
 
     def calibrate(self):
-        i = self.info.ID
-        result = self.lib.EFWCalibrate(i)
+        result = self.lib.EFWCalibrate(self.i)
         if result != 0:
-            print(f"EFWCalibrate failed for wheel {i} with error code {result}")
+            print(f"EFWCalibrate failed for wheel {self.i} with error code {result}")
 
 def get_normalized_arch():
     raw = platform.machine().lower()

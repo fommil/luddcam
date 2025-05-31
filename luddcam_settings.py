@@ -9,22 +9,16 @@ import warnings
 from box import Box
 import pygame
 
-# NOTE: generally I've found pygame_menu to be quite fiddly to work with.
+# NOTE: pygame_menu has some quirks:
 #
-# The most annoying quirks are:
-#
-# 1. no built in tab based navigation mode, so it's been hard to build
-#    the DSLR settings menu, and I've had to emulate one.
+# 1. no built in tab based navigation mode, so I've emulated one.
 # 2. selectors must be rebuilt if their items change
 # 3. selectors fire onchange multiple times to reach the default
-# 4. doesn't seem to allow actions to create new menus
+# 4. doesn't seem to allow actions to create new menus, they
+#    must be made in advance.
 # 5. range_slider doesn't support gamepads
 # 6. after a clear / rebuild a menu still renders the old version
 #    until there's an event on it.
-#
-# and I'd be tempted to drop it in favour of something else. We might
-# be ok using the default raspberry pi desktop, which would open up a
-# lot more options. Basic tk is a reasonable option.
 
 import pygame_menu
 import pygame_menu.controls as ctrl
@@ -34,6 +28,8 @@ import zwo
 ALIGN_LEFT=pygame_menu.locals.ALIGN_LEFT
 ALIGN_RIGHT=pygame_menu.locals.ALIGN_RIGHT
 
+# FIXME abstract over MEDIA_BASE by platform
+#
 # we assume that all removable media shows up here. We're intentionally
 # limiting portability to Linux to simplify the code.
 MEDIA_BASE = f"/media/{os.getlogin()}/"
@@ -57,20 +53,16 @@ if (hack := pygame.font.match_font('hack')):
 
 # settings are the following shape.
 #
-# camera: { name: <str>, guide: <bool>, cooling: <bool>, gain_{min,max,default,unity}: <int> }
-# guide: { name: <str>, guide: <bool>, cooling: <bool>, gain_{min,max,default,unity}: <int> }
-# wheel: { name: <str>, slots: <int> }
+# camera: <str>
+# guide: <str>
+# wheel: <str>
 # drive: <str> (relative to MEDIA_BASE)
 #
-# prefs: { <camera_name> : PREF }
-# filters: { <wheel_name> : [<str> | null] }
+# cameras: { <camera_name> : CAMERA }
+# wheels: { <wheel_name> : [<str> | null] }
 #
-# PREF := { cooling: <int>, gain: <int>, intervals: [ INTERVAL ] }
+# CAMERA := { cooling: <int>, gain: <int>, intervals: [ INTERVAL ] }
 # INTERVAL := {exposure: <int>, frames: <int>, slot: <int> }
-#
-# There may appear to be some redundancy between camera, guide, wheel and
-# prefs, but note that prefs is not guaranteed to exist. This may be
-# changed in the future.
 class Menu:
     def __init__(self):
         if os.path.isfile(SETTINGS_FILE):
@@ -81,8 +73,14 @@ class Menu:
 
         self.zwo_asi = zwo.AsiCamera2()
         self.zwo_efw = zwo.EfwFilter()
-        self.cached_camera = None
-        self.cached_wheel = None
+        self.refresh = True
+
+        # these are impls, not names. They should always match the settings
+        # and are populated when we (re)build the menus.
+        self.camera = None
+        self.guide = None
+        self.wheel = None
+        # cameras, guides, wheels defined later which hold all the last scanned impls
 
         # I tried using a MenuLink to emulate tab behaviour, but it didn't work for the
         # kind of navigation we want where moving the joystick left/right when selecting
@@ -101,58 +99,13 @@ class Menu:
             d = self.settings.to_dict()
             json.dump(d, f, indent=2, sort_keys=True)
 
-    def camera(self):
-        camera = self.settings.camera
-        if camera:
-            if not self.cached_camera or self.cached_camera[0] != camera.name or not self.cached_camera[1]:
-                print(f"creating new camera impl for {camera}")
-                self.cached_camera = (camera.name, self.zwo_asi.find_camera(camera.name))
-            return self.cached_camera[1]
+    def camera_settings(self):
+        if self.settings.camera:
+            return self.settings.cameras[self.settings.camera]
 
-    def wheel(self):
-        wheel = self.settings.wheel
-        if wheel:
-            if not self.cached_wheel or self.cached_wheel[0] != wheel.name or not self.cached_wheel[1]:
-                print(f"creating new wheel impl for {wheel}")
-                self.cached_wheel = (wheel.name, self.zwo_efw.find_wheel(wheel.name))
-            return self.cached_wheel[1]
-
-    def get_prefs(self):
-        camera = self.settings.camera
-        if not camera:
-            return
-        prefs = self.settings.prefs.get(camera.name)
-
-        if camera.cooling and prefs.cooling == {}:
-            prefs.cooling = 0
-        if not prefs.gain:
-            prefs.gain = camera.gain_unity or camera.gain.gain_default
-        if not prefs.intervals:
-            prefs.intervals = []
-
-        return prefs
-
-    def get_filters(self):
-        wheel = self.settings.wheel
-        if not wheel:
-            return
-        filters = self.settings.filters.get(wheel.name)
-        if not filters or len(filters) != wheel.slots:
-            filters = [None] * wheel.slots
-            self.settings.filters[wheel.name] = filters
-        return filters
-
-    def get_filter_name(self, i, no_gen = False):
-        filters = self.get_filters()
-        if not filters:
-            return
-        return filters[i]
-
-    def set_filter_name(self, i, value = None):
-        filters = self.get_filters()
-        if not filters:
-            return
-        filters[i] = value
+    def wheel_settings(self):
+        if self.settings.wheel:
+            return self.settings.wheels[self.settings.wheel]
 
     # needs to be called any time settings are changed.
     # the option to skip rebuilding the devices menu allows
@@ -197,109 +150,156 @@ class Menu:
 
     def mk_devices(self, menu):
         initialized = False
-        # pygame_menu doesn't allow selector entries to be updated, so when any
-        # of the items change we have to rebuild the whole menu.
         menu.clear()
         menu.add.button(f"Devices              1 / {len(self.menus)}", align=ALIGN_RIGHT)
 
-        # the general approach here is: if you don't want to use something
-        # then don't attach it. That way everything "just works" by default
-        # if it is the only thing that is plugged in.
-        zwo_cameras = self.zwo_asi.cameras()
-        cameras = [a for a in zwo_cameras if not a.guide]
-        guides = [a for a in zwo_cameras if a.guide]
+        # the general approach here is: if you don't want to use something then
+        # don't attach it. That way everything "just works" by default if it is
+        # the only thing that is plugged in.
+        if self.refresh:
+            print("refreshing ZWO hardware")
+            zwo_cameras = self.zwo_asi.cameras()
+            self.cameras = [a for a in zwo_cameras if not a.guide]
+            self.guides = [a for a in zwo_cameras if a.guide]
+            self.wheels = self.zwo_efw.wheels()
+            self.refresh = False
 
-        wheels = self.zwo_efw.wheels()
+        def set_camera(c):
+            if c == self.camera:
+                return
+            if not c:
+                print("unsetting camera")
+                self.settings.camera = None
+                self.camera = None
+                return
+            print(f"set camera {c}")
+            self.settings.camera = c.name
+            self.camera = c
+            prefs = self.camera_settings()
+            if prefs.cooling == {}:
+                prefs.cooling = 0
+            if prefs.gain == {}:
+                if c.gain_unity != None:
+                    prefs.gain = c.gain_unity
+                else:
+                    prefs.gain = c.gain_default
+            if prefs.intervals == {}:
+                prefs.intervals = []
 
-        if not cameras:
+            self.camera.cooling(prefs.cooling)
+
+        if not self.cameras:
             button = menu.add.button("Camera: none", align=ALIGN_LEFT)
             button.update_font({"color": (100, 100, 100)})
-            self.settings.camera = None
+            set_camera(None)
         else:
             def select_camera(a, camera):
-                if not initialized:
+                if not initialized or self.camera == camera:
                     return
-                if self.settings.camera == camera:
-                    return
-                self.settings.camera = camera
-                print(f"selected camera {camera}")
+                set_camera(camera)
                 self.rebuild_menus()
-            camera = self.settings.camera
-            default = cameras.index(camera) if camera and camera in cameras else 0
-            self.settings.camera = cameras[default]
-            items = [(a.name, a) for a in cameras]
+            if self.camera:
+                default = find_index(self.cameras, lambda c: c.name == self.camera.name, 0)
+            else:
+                default = 0
+            set_camera(self.cameras[default])
             menu.add.selector(
                 title="Camera: ",
-                items=items,
+                items=[(a.name, a) for a in self.cameras],
                 default=default,
                 onchange=select_camera,
                 align=ALIGN_LEFT)
 
-        if not guides:
+        def set_guide(c):
+            if c == self.guide:
+                return
+            if not c:
+                print("unsetting guide")
+                self.settings.guide = None
+                self.guide = None
+                return
+            print(f"set guide {c}")
+            self.settings.guide = c.name
+            self.guide = c
+        if not self.guides:
             button = menu.add.button("Guide: none", align=ALIGN_LEFT)
             button.update_font({"color": (100, 100, 100)})
-            self.settings.guide = None
+            set_guide(None)
         else:
             def select_guide(a, guide):
-                if not initialized:
+                if not initialized or self.guide == guide:
                     return
-                if self.settings.guide == guide:
-                    return
-                self.settings.guide = guide
-                print(f"selected guide {guide}")
+                set_guide(guide)
                 # don't need to rebuild menus
-            guide = self.settings.guide
-            default = guides.index(guide) if guide and guide in guides else 0
-            self.settings.guide = guides[default]
-            items = [(a.name, a) for a in guides]
+            if self.guide:
+                default = find_index(self.guides, lambda c: c.name == self.guide.name, 0)
+            else:
+                default = 0
+            set_guide(self.guides[default])
             menu.add.selector(
                 title="Guide: ",
-                items=items,
+                items=[(a.name, a) for a in self.guides],
                 default=default,
                 onchange=select_guide,
                 align=ALIGN_LEFT)
 
-        if not wheels:
+        def set_wheel(w):
+            if w == self.wheel:
+                return
+            if not w:
+                print("unsetting wheel")
+                self.settings.wheel = None
+                self.wheel = None
+                return
+            print(f"set wheel {w}")
+            self.settings.wheel = w.name
+            self.wheel = w
+            prefs = self.wheel_settings()
+            if len(prefs.filters) != self.wheel.slots:
+                prefs.filters = [None] * self.wheel.slots
+        if not self.wheels:
             button = menu.add.button("Filter Wheel: none", align=ALIGN_LEFT)
             button.update_font({"color": (100, 100, 100)})
-            self.settings.wheel = None
+            set_wheel(None)
         else:
             def select_wheel(a, wheel):
-                if not initialized:
+                if not initialized or self.wheel == wheel:
                     return
-                if self.settings.wheel == wheel:
-                    return
-                self.settings.wheel = wheel
-                print(f"selected wheel {wheel}")
+                set_wheel(wheel)
                 self.rebuild_menus()
-            wheel = self.settings.wheel
-            default = wheels.index(wheel) if wheel and wheel in wheels else 0
-            self.settings.wheel = wheels[default]
-            items = [(a.name, a) for a in wheels]
+            if self.wheel:
+                default = find_index(self.wheels, lambda c: c.name == self.wheel.name, 0)
+            else:
+                default = 0
+            set_wheel(self.wheels[default])
             menu.add.selector(
                 title="Filter Wheel: ",
-                items=items,
+                items=[(a.name, a) for a in self.wheels],
                 default=default,
                 onchange=select_wheel,
                 align=ALIGN_LEFT)
 
+        def set_drive(d):
+            if not d:
+                print("unsetting drive")
+                self.settings.drive = None
+                return
+            print(f"set drive {d}")
+            self.settings.drive = d
         drives = os.listdir(MEDIA_BASE)
         if not drives:
             button = menu.add.button("Drive: none", align=ALIGN_LEFT)
             button.update_font({"color": (100, 100, 100)})
-            self.settings.drive = None
+            set_drive(None)
         else:
             def select_drive(a):
-                if not initialized:
-                    return
                 drive = a[0][0]
-                if self.settings.drive == drive:
+                if not initialized or self.settings.drive == drive:
                     return
-                self.settings.drive = drive
-                print(f"selected drive {drive}")
-            drive = self.settings.drive
-            default = drives.index(drive) if drive and drive in drives else 0
-            self.settings.drive = drives[default]
+                set_drive(drive)
+            default = find_index(drives, lambda c: c == self.settings.drive, 0)
+            print(f"DEBUG DEFAULT DRIVE = {default} in {drives}")
+            set_drive(drives[default])
             menu.add.selector(
                 title="Drive: ",
                 items=tuples(drives),
@@ -312,7 +312,10 @@ class Menu:
             confirm_format.add.button('Yes', lambda m: (self.format_drive(), m._back()), confirm_format)
             menu.add.button("Format", action=confirm_format, align=ALIGN_LEFT)
 
-        menu.add.button("Refresh", action=self.rebuild_menus, align=ALIGN_LEFT)
+        def select_refresh():
+            self.refresh = True
+            self.rebuild_menus()
+        menu.add.button("Refresh", action=select_refresh, align=ALIGN_LEFT)
         initialized = True
 
     def mk_filters(self, menu):
@@ -320,7 +323,7 @@ class Menu:
         menu.clear()
         menu.add.button(f"Filter Wheels           2 / {len(self.menus)}", align=ALIGN_RIGHT)
 
-        if not self.settings.wheel or not self.settings.camera:
+        if not self.wheel:
             button = menu.add.button("No slots", align=ALIGN_LEFT)
             button.update_font({"color": (100, 100, 100)})
             return
@@ -334,16 +337,17 @@ class Menu:
             name = a[0][0]
             if name == FILTER_OPTIONS[0]:
                 name = None
-            if self.get_filter_name(i) == name:
+            filters = self.wheel_settings().filters
+            if filters[i] == name:
                 return
-            self.set_filter_name(i, name)
-            print(f"updated slot {i} to {name}")
+            print(f"updating slot {i} to {name}")
+            filters[i] = name
             self.rebuild_menus(skip_devices = True)
 
-        exclude = [f for f in self.get_filters() if f]
-        for i in range(self.settings.wheel.slots):
-            choice = self.get_filter_name(i) or FILTER_OPTIONS[0]
-            options = [f for f in FILTER_OPTIONS if f == choice or f not in exclude]
+        filters = self.wheel_settings().filters
+        for i in range(len(filters)):
+            choice = filters[i] or FILTER_OPTIONS[0]
+            options = [f for f in FILTER_OPTIONS if f == choice or f not in filters]
             default = options.index(choice) if choice in options else 0
             menu.add.selector(
                 title=f"Slot {i + 1}: ",
@@ -354,10 +358,9 @@ class Menu:
 
         def calibrate():
             print("called calibrate")
-            if (api := self.wheel()):
-                api.calibrate()
-
+            self.wheel.calibrate()
         menu.add.button("Calibrate", action=calibrate, align=ALIGN_LEFT)
+
         initialized = True
 
     def mk_intervals(self, menu):
@@ -365,7 +368,7 @@ class Menu:
         menu.clear()
         menu.add.button(f"Intervals              3 / {len(self.menus)}", align=ALIGN_RIGHT)
 
-        if not self.settings.camera:
+        if not self.camera:
             button = menu.add.button("No camera", align=ALIGN_LEFT)
             button.update_font({"color": (100, 100, 100)})
             return
@@ -374,9 +377,11 @@ class Menu:
         # TODO save (we can have 2 numbered slots, per hardware combo)
 
         def clear():
-            self.get_prefs().intervals = []
+            self.camera_settings().intervals = []
             rebuild_menu(menu, self.mk_intervals)
-        if not self.get_prefs().intervals:
+
+        intervals = self.camera_settings().intervals
+        if not intervals:
             button = menu.add.button("Clear", clear, align=ALIGN_LEFT)
             button.update_font({"color": (100, 100, 100)})
         else:
@@ -385,18 +390,17 @@ class Menu:
         # pygame_menu requires submenus to be constructed in advance
         # so we have to create a menu for every possible action.
 
-        intervals = self.get_prefs().intervals
         if intervals:
             menu.add.label("-" * 32, font_size=10, align=ALIGN_LEFT)
 
         def filter_name(i):
-            return self.get_filter_name(i) or f"Slot {i + 1}"
+            return self.wheel_settings().filters[i] or f"Slot {i + 1}"
 
         for entry in intervals:
             # TODO clicking asks for edit / move / delete
             e = Box(entry)
             suf = ""
-            if self.settings.wheel:
+            if self.wheel:
                 suf = f" with {filter_name(e.slot)}"
             summary = ""
             total = int((e.frames * e.exposure) / 60)
@@ -413,9 +417,9 @@ class Menu:
         new_entry.frames = 20
 
         filter_choices = []
-        if self.settings.wheel:
+        if self.wheel:
             new_entry.slot = 0
-            for i in range(self.settings.wheel.slots):
+            for i in range(self.wheel.slots):
                 # we want to display the name, but use the slot number in the
                 # config. Which means if the user changes the slot naming then
                 # the intervalometer setup may need to be adjusted.
@@ -446,7 +450,7 @@ class Menu:
         def add():
             if not initialized:
                 return
-            self.get_prefs().intervals.append(new_entry)
+            intervals.append(new_entry)
             print(f"adding the new entry {new_entry}")
             # only impacts this menu
             rebuild_menu(menu, self.mk_intervals, count_from_end = True)
@@ -477,9 +481,7 @@ class Menu:
         menu_add.add.button('Cancel', pygame_menu.events.BACK, align=ALIGN_LEFT)
         menu.add.button("Add", action=menu_add, align=ALIGN_LEFT)
 
-        # TODO "repeat last N entries X times"
-        # if self.intervals:
-        #     menu.add.button("Repeat", action=menu_repeat, align=ALIGN_LEFT)
+        # TODO repeat tickbox
 
         initialized = True
 
@@ -488,61 +490,54 @@ class Menu:
         menu.clear()
         menu.add.button(f"Camera              4 / {len(self.menus)}", align=ALIGN_RIGHT)
 
-        if not self.settings.camera:
+        if not self.camera:
             button = menu.add.button("No camera", align=ALIGN_LEFT)
             button.update_font({"color": (100, 100, 100)})
         else:
-            if self.settings.camera.cooling:
+            if not self.camera.is_cooled:
+                button = menu.add.button("No cooling", align=ALIGN_LEFT)
+                button.update_font({"color": (100, 100, 100)})
+            else:
                 def update_cooling(a, cooling):
-                    if not initialized:
+                    if not initialized or cooling == self.camera_settings().cooling:
                         return
-                    if cooling == self.get_prefs().cooling:
-                        return
-                    self.get_prefs().cooling = cooling
-                    print(f"changed target temp to {cooling}")
+                    self.camera_settings().cooling = cooling
+                    self.camera.cooling(cooling)
 
                 # range_slider doesn't work with a gamepad...
                 # https://github.com/ppizarror/pygame-menu/issues/478
-                cooling = self.get_prefs().cooling
+                cooling = self.camera_settings().cooling
                 options = list(range(-20, 20 + 1, 5))
-                default = options.index(cooling)
-                choices = [(f"{i}°C", i) for i in options]
                 menu.add.selector(
                     "Target Temp: ",
-                    items=choices,
-                    default=default,
+                    items=[(f"{i}°C", i) for i in options],
+                    default=options.index(cooling),
                     onchange=update_cooling,
                     align=ALIGN_LEFT)
-            else:
-                button = menu.add.button("No cooling", align=ALIGN_LEFT)
-                button.update_font({"color": (100, 100, 100)})
 
             # TODO binning
             # TODO anti-dew heater
+            # TODO offset
 
-            # print(f"camera gain settings = {self.settings.camera.gain}")
-            if self.settings.camera.gain_max:
+            if self.camera.has_gain:
                 def update_gain(a, gain):
-                    if not initialized:
+                    if not initialized or gain == self.camera_settings().gain:
                         return
-                    if gain == self.get_prefs().gain:
-                        return
-                    self.get_prefs().gain = gain
+                    self.camera_settings().gain = gain
                     print(f"changed camera gain to {gain}")
-                gain = self.get_prefs().gain
-                start = self.settings.camera.gain_min
-                end = self.settings.camera.gain_max
+                gain = self.camera_settings().gain
+                start = self.camera.gain_min
+                end = self.camera.gain_max
                 step = round((end - start) / 10)
                 options = list(range(start, end + 1, step))
-                if gain not in options:
-                    options.append(gain)
-                    options = sorted(set(options))
-                choices = [(f"{i}", i) for i in options]
-                default = options.index(gain)
+                if self.camera.gain_unity:
+                    options.append(self.camera.gain_unity)
+                options.append(self.camera.gain_default)
+                options = sorted(set(options))
                 menu.add.selector(
                     "Gain: ",
-                    items=choices,
-                    default=default,
+                    items=[(f"{i}", i) for i in options],
+                    default=options.index(gain),
                     onchange=update_gain,
                     align=ALIGN_LEFT)
 
@@ -566,6 +561,8 @@ class Menu:
 # enable automatic object tracking in boost mode
 # enable autostretching in live / playback
 
+# FIXME abstract out all uses of run so we can be multi-platform (at least partially)
+#
 # convenient want to shell out. If we want to make this portable, we'd need
 # to find all uses of this and use portable python libraries instead of
 # linux commands.
@@ -646,3 +643,7 @@ def is_button(event):
     return (event.type in [pygame.JOYBUTTONDOWN, pygame.KEYDOWN] or
             event.type == pygame.JOYAXISMOTION and
             abs(event.value) > ctrl.JOY_DEADZONE)
+
+# how is this not in the stdlib?
+def find_index(lst, pred, default=None):
+    return next((i for i, x in enumerate(lst) if pred(x)), default)

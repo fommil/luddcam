@@ -159,12 +159,8 @@ def main():
 
         # TODO do captures on a different thread
         if mode == Mode.LIVE:
-            if (camera := settings_menu.camera()):
-                prefs = settings_menu.get_prefs()
-                if camera.target_temp == None and prefs.cooling != None:
-                    print(f"setting the target cooling to {prefs.cooling}")
-                    camera.cooling(prefs.cooling)
-                    print(f"new target = {camera.target_temp}")
+            if (camera := settings_menu.camera):
+                prefs = settings_menu.camera_settings()
 
                 if not capturing:
                     gain = prefs.gain
