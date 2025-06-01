@@ -188,6 +188,9 @@ class Menu:
 
             self.camera.cooling(prefs.cooling)
 
+        # FIXME allow selecting the guide camera as the main camera
+        # (e.g. for planetary) and setting to <none>
+
         if not self.cameras:
             button = menu.add.button("Camera: none", align=ALIGN_LEFT)
             button.update_font({"color": (100, 100, 100)})

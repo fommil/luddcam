@@ -1,6 +1,8 @@
 from ctypes import *
 from enum import IntEnum
+import itertools
 import platform
+import time
 
 import numpy as np
 from box import Box
@@ -140,7 +142,8 @@ class ASI_CAMERA_INFO(Structure):
             2: "RAW16",
             3: "Y8"
         }
-        video_formats = [formats.get(f, f"Unknown({f})") for f in self.SupportedVideoFormat if f >= 0]
+        supported = itertools.takewhile(lambda i: i >= 0, self.SupportedVideoFormat)
+        video_formats = [formats.get(f, f"Unknown({f})") for f in supported]
 
         return (
             f"Camera Name: {self.Name.decode('utf-8').rstrip(chr(0))}\n"
@@ -254,6 +257,7 @@ class Camera:
         self.name = None
         self.is_cooled = None
         self.has_gain = None
+        self.blinked = False
 
         result = self.lib.ASIGetCameraProperty(byref(self.info), self.i)
         if result != 0:
@@ -351,22 +355,48 @@ class Camera:
         width, height, binning, img_type = c_int(), c_int(), c_int(), c_int()
         assert self.lib.ASIGetROIFormat(self.i, byref(width), byref(height), byref(binning), byref(img_type)) == 0
         print(f"initial roi was {width}, {height}, {binning}, {img_type}")
-        # assert width.value == self.info.MaxWidth
-        # assert height.value == self.info.MaxHeight
-        # assert binning.value == 1
-        # assert img_type.value == ASI_IMG_TYPE.ASI_IMG_RAW16
 
-        #print(f"DEBUG: starting a capture with w={width},h={height}")
-        # if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_HIGH_SPEED_MODE, ASI_BOOL.ASI_FALSE, ASI_BOOL.ASI_FALSE)) != 0:
-        #     print(f"error setting high speed mode {self.i} {result}")
-        #     return
-        # FIXME RAW16 is causing everything to fail
+        # TODO check if 16 bit is supported before trying to set it
+        # before we can change the format to 16 bit we have to blink, i.e. a couple of frames
+        # with the default values. Seems to be a weird ZWO quirk. We do this in a blocking way
+        # because it's pretty quick.
+        if not self.blinked:
+            call(self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_EXPOSURE, 10000, ASI_BOOL.ASI_FALSE))
+            for i in range(2):
+                call(self.lib.ASIStartExposure(self.i, ASI_BOOL.ASI_FALSE))
+                status = c_int(ASI_EXPOSURE_STATUS.ASI_EXP_WORKING)
+                while status.value == ASI_EXPOSURE_STATUS.ASI_EXP_WORKING:
+                    call(self.lib.ASIGetExpStatus(self.i, byref(status)))
+#                    print("waiting for exposure to finish")
+                    time.sleep(0.05)
+                if status.value == ASI_EXPOSURE_STATUS.ASI_EXP_SUCCESS:
+                    print(f"blink succeeded")
+                else:
+                    print(f"blink failed with {status.value}")
+                # indi-asi doesn't stop the exposure or read from it
+#        self.blinked = True
+
         if (result := self.lib.ASISetROIFormat(self.i, width, height, 1, ASI_IMG_TYPE.ASI_IMG_RAW16)) != 0:
             print(f"error setting image format {self.i} {result}")
             return
         if (result := self.lib.ASISetStartPos(self.i, 0, 0)) != 0:
             print(f"error resetting the roi start {self.i} {result}")
             return
+
+        if not self.blinked:
+            call(self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_EXPOSURE, 10000, ASI_BOOL.ASI_FALSE))
+            for i in range(2):
+                call(self.lib.ASIStartExposure(self.i, ASI_BOOL.ASI_FALSE))
+                status = c_int(ASI_EXPOSURE_STATUS.ASI_EXP_WORKING)
+                while status.value == ASI_EXPOSURE_STATUS.ASI_EXP_WORKING:
+                    call(self.lib.ASIGetExpStatus(self.i, byref(status)))
+#                    print("waiting for exposure to finish")
+                    time.sleep(0.05)
+                if status.value == ASI_EXPOSURE_STATUS.ASI_EXP_SUCCESS:
+                    print(f"blink succeeded")
+                else:
+                    print(f"blink failed with {status.value}")
+#        self.blinked = True
 
         # assert self.lib.ASIGetROIFormat(self.i, byref(width), byref(height), byref(binning), byref(img_type)) == 0
         # print(f"updated roi is {width}, {height}, {binning}, {img_type}")
@@ -559,19 +589,26 @@ def get_unity_gain(camera_name):
             return gain
     return None
 
+def call(ret):
+    if ret != 0:
+        raise ZwoError(ret)
+
+class ZwoError(Exception):
+    def __init__(self, ret):
+        super().__init__(f"return code was {ret}")
+
 # minimal test, check we can make an exposure on a single camera
 if __name__ == '__main__':
-    import time
-
     api = AsiCamera2()
     cameras = api.cameras()
     assert len(cameras) == 1
     camera = cameras[0]
 
     camera.cooling(0)
-#    time.sleep(10)
+    time.sleep(10)
 
     camera.capture_start(100, 1)
+    time.sleep(1)
     while True:
         status = camera.capture_wait()
         print(f"status = {status}")
@@ -580,5 +617,3 @@ if __name__ == '__main__':
             continue
         else:
             break
-
-
