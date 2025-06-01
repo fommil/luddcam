@@ -349,12 +349,26 @@ class Camera:
         #     print(f"failed to stop (potentially stale) exposures")
         #     return
 
-        width = self.info.MaxWidth
-        height = self.info.MaxHeight
+        #width = self.info.MaxWidth
+        #height = self.info.MaxHeight
         # print(f"max dims are {width}, {height}")
         width, height, binning, img_type = c_int(), c_int(), c_int(), c_int()
         assert self.lib.ASIGetROIFormat(self.i, byref(width), byref(height), byref(binning), byref(img_type)) == 0
         print(f"initial roi was {width}, {height}, {binning}, {img_type}")
+
+        # TODO turn off hardware binning and high speed mode
+        # call(self.lib.ASIStopExposure(self.i))
+        # val = c_long()
+        # auto = c_int()
+        # call(self.lib.ASIGetControlValue(self.i, ASI_CONTROL_TYPE.ASI_HARDWARE_BIN, byref(val), byref(auto)))
+        # print(f"HARDWARE_BIN: {val.value} {auto.value}")
+        call(self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_HARDWARE_BIN, ASI_BOOL.ASI_FALSE, ASI_BOOL.ASI_FALSE))
+
+        # call(self.lib.ASIGetControlValue(self.i, ASI_CONTROL_TYPE.ASI_HIGH_SPEED_MODE, byref(val), byref(auto)))
+        # print(f"HIGH_SPEED_MODE: {val.value} {auto.value}")
+        call(self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_HIGH_SPEED_MODE, ASI_BOOL.ASI_FALSE, ASI_BOOL.ASI_FALSE))
+
+        call(self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_BANDWIDTHOVERLOAD, 40, ASI_BOOL.ASI_FALSE))
 
         # TODO check if 16 bit is supported before trying to set it
         # before we can change the format to 16 bit we have to blink, i.e. a couple of frames
@@ -376,12 +390,17 @@ class Camera:
                 # indi-asi doesn't stop the exposure or read from it
 #        self.blinked = True
 
-        if (result := self.lib.ASISetROIFormat(self.i, width, height, 1, ASI_IMG_TYPE.ASI_IMG_RAW16)) != 0:
+        call(self.lib.ASIStopExposure(self.i))
+        # while (status := self.capture_wait()) != ASI_EXPOSURE_STATUS.ASI_EXP_IDLE:
+        #     print(f"waiting for idle, currently {status}")
+        #     time.sleep(0.1)
+
+        if (result := self.lib.ASISetROIFormat(self.i, width.value, height.value, binning.value, ASI_IMG_TYPE.ASI_IMG_RAW16)) != 0:
             print(f"error setting image format {self.i} {result}")
             return
-        if (result := self.lib.ASISetStartPos(self.i, 0, 0)) != 0:
-            print(f"error resetting the roi start {self.i} {result}")
-            return
+        # if (result := self.lib.ASISetStartPos(self.i, 0, 0)) != 0:
+        #     print(f"error resetting the roi start {self.i} {result}")
+        #     return
 
         if not self.blinked:
             call(self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_EXPOSURE, 10000, ASI_BOOL.ASI_FALSE))
@@ -557,6 +576,7 @@ def get_normalized_arch():
     else:
         return "unknown"
 
+# TODO replace this hacky lookup with a call to ASIGetGainOffset
 # collected by chatgpt from forums
 def get_unity_gain(camera_name):
     model_map = {
@@ -605,7 +625,7 @@ if __name__ == '__main__':
     camera = cameras[0]
 
     camera.cooling(0)
-    time.sleep(10)
+    # time.sleep(10)
 
     camera.capture_start(100, 1)
     time.sleep(1)
