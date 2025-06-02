@@ -157,6 +157,10 @@ def main():
         pygame.display.update()
         clock.tick(FPS)
 
+        # FIXME let's implement LIVE mode fully, with a min and max limit on
+        #       exposure and support pressing the shutter, which drops us into a
+        #       reduced playback mode.
+
         # TODO do captures on a different thread
         if mode == Mode.LIVE:
             if (camera := settings_menu.camera):
