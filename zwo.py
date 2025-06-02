@@ -1,3 +1,8 @@
+# this file is a placeholder until I figure out the exact API I need
+# and then swap to using indilib for maximum device support. This
+# assumes that libasi has been installed already so that the native
+# libs are available on the LD path.
+
 from ctypes import *
 from enum import IntEnum
 import itertools
@@ -184,7 +189,7 @@ class AsiCamera2:
     def __init__(self):
         arch = get_normalized_arch()
         print(f"arch = {arch}")
-        self.lib = CDLL(f"lib/{arch}/libASICamera2.so.1.37")
+        self.lib = CDLL("libASICamera2.so")
 
         self.lib.ASIGetNumOfConnectedCameras.restype = c_int
         self.lib.ASIGetNumOfConnectedCameras.argtypes = []
@@ -491,8 +496,8 @@ class EFW_INFO(Structure):
 class EfwFilter:
     def __init__(self):
         arch = get_normalized_arch()
-        #self.dep = CDLL("libudev.so")
-        self.lib = CDLL(f"lib/{arch}/libEFWFilter.so.1.7")
+        self.dep = CDLL("libudev.so.1", mode=RTLD_GLOBAL)
+        self.lib = CDLL("libEFWFilter.so")
 
         self.lib.EFWGetNum.restype = c_int
         self.lib.EFWGetNum.argtypes = []

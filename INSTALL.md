@@ -1,30 +1,32 @@
 # Installation
 
-## Dependencies
+Hopefully this will be one-click when I package it up as a `.deb` file.
 
-We require some python dependency management tools
+# Dependencies
+
+## Windows / Mac
+
+This currently only works on a Linux desktop (or raspberry pi), ping me if you're interested.
+
+## Linux
+
+If you're on a desktop like Debian you may need to enable `non-free` or `contrib` to get access to ZWO libs, but these should be available on a standard raspberry pi by default:
 
 ```
-sudo apt install python3-pygame python3-box
+sudo apt install python3-pygame python3-box devmon udevil exfat-fuse fonts-hack libasi
 
-# not used yet, but I intend to use them
-sudo apt install python3-opencv python3-photutils python3-astropy
-```
-
-To be able to write to USB drives, we require `udevil` and `devmon` to be installed on the rpi. These should be installed by default but just to be sure, make sure to type:
-
-```
-sudo apt install udevil exfat-fuse
+# workaround bug in raspberry pi devmon/exfat support
 sudo ln -s mount.exfat-fuse /usr/sbin/mount.exfat
 ```
 
-and to look pretty
+To have permissions to format drives, you may need to have a suitable sudoer entry in `/etc/sudoers.d/` (this is not necessary on the raspberry pi)
 
 ```
-sudo apt install fonts-hack
+echo "${USER} ALL=(ALL) NOPASSWD: /sbin/mkfs.*" | sudo tee /etc/sudoers.d/format > /dev/null
+sudo chmod 0440 /etc/sudoers.d/format
 ```
 
-## User Service
+# LuddCam
 
 We'll define it as a user service and turn off the desktop.
 
@@ -54,54 +56,6 @@ systemctl --user enable luddcam.service
 ```
 
 Then when you reboot, it should start up!
-
-# Developers
-
-To run on your local dev machine, prefer to use your system installed version of pygame and opencv. Then use the above command to install pygame_menu. This sucks, I'd rather have a reproducible build environment, but it turns out that pipenv doesn't really work on the pi. You should be able to use pyenv to isolate everything if you really want to but you'll still be pulling in mystery meat binaries. Let's just hope there are no major mismatches in versions: I've at least tried to stick to only things that are available on the rpi.
-
-To get access to ZWO usb devices you may need to add the following udev rules (note that something similar is already in place if you every installed `indi-asi`, a dependency of `kstars`)
-
-# FIXME just reuse the same files that indi-asi is using
-
-```
-sudo tee /etc/udev/rules.d/99-zwo.rules > /dev/null <<'EOF'
-# ZWO USB device access
-SUBSYSTEM=="usb", ATTR{idVendor}=="03c3", GROUP="plugdev", MODE="0660", TAG+="uaccess"
-
-# ZWO EFW HID device access
-KERNEL=="hidraw*", ATTRS{idVendor}=="03c3", GROUP="plugdev", MODE="0660", TAG+="uaccess"
-EOF
-
-sudo udevadm control --reload-rules
-sudo udevadm trigger
-```
-
-and potentially raise the default file size transfer, check with
-
-```
-cat /sys/module/usbcore/parameters/usbfs_memory_mb
-```
-
-And if that is low (e.g. 16) then consider raising it temporarily with
-
-```
-echo 1024 | sudo tee /sys/module/usbcore/parameters/usbfs_memory_mb
-```
-
-or permanently by adding `usbcore.usbfs_memory_mb=1024` to kernel startup parameters, e.g. by adding it to `GRUB_CMDLINE_LINUX_DEFAULT` in `/etc/default/grub` and then running `sudo update-grub` or (slighly uglier) add the following to the udev rule above
-
-```
-# ZWO ASI cameras require larger memory transfer limits than the default
-# (note this updates the global usbfs limit)
-ACTION=="add", ATTR{idVendor}=="03c3", RUN+="/bin/sh -c '/bin/echo 1024 >/sys/module/usbcore/parameters/usbfs_memory_mb'"
-```
-
-To have permissions to format drives, you may need to have a suitable sudoer entry in `/etc/sudoers.d/`
-
-```
-echo "${USER} ALL=(ALL) NOPASSWD: /sbin/mkfs.*" | sudo tee /etc/sudoers.d/format > /dev/null
-sudo chmod 0440 /etc/sudoers.d/format
-```
 
 # Version 2
 

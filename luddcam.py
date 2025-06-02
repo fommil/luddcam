@@ -213,5 +213,5 @@ if __name__ == '__main__':
         traceback.print_exc()
 
 # Local Variables:
-# compile-command: "PYTHONUNBUFFERED=1 LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libudev.so.1 SDL_VIDEODRIVER=x11 SDL_AUDIODRIVER=dummy SDL_NOMOUSE=1 python3 luddcam.py 2>&1 | grep -v DETECT_AVX2"
+# compile-command: "PYTHONUNBUFFERED=1 SDL_VIDEODRIVER=x11 SDL_AUDIODRIVER=dummy SDL_NOMOUSE=1 python3 luddcam.py 2>&1 | grep -v DETECT_AVX2"
 # End:
