@@ -136,8 +136,13 @@ class ASI_CAMERA_INFO(Structure):
         ("Unused", c_char * 16)
     ]
 
+    # prefer this over the raw .Name field
     def name(self):
         return self.Name.decode('utf-8', errors='ignore').rstrip('\x00')
+
+    # prefer this over the .SupportedVideoFormats field
+    def supported_formats(self):
+        return itertools.takewhile(lambda i: i >= 0, self.SupportedVideoFormat)
 
     def __str__(self):
         bins = [str(b) for b in self.SupportedBins if b > 0]
@@ -147,8 +152,7 @@ class ASI_CAMERA_INFO(Structure):
             2: "RAW16",
             3: "Y8"
         }
-        supported = itertools.takewhile(lambda i: i >= 0, self.SupportedVideoFormat)
-        video_formats = [formats.get(f, f"Unknown({f})") for f in supported]
+        video_formats = [formats.get(f, f"Unknown({f})") for f in self.supported_formats()]
 
         return (
             f"Camera Name: {self.Name.decode('utf-8').rstrip(chr(0))}\n"
@@ -362,13 +366,17 @@ class Camera:
 
         call(self.lib.ASIStopExposure(self.i))
 
-        # TODO assuming 16 bit, should probably check that it's supported
-        if width.value != self.info.MaxWidth or height.value != self.info.MaxHeight or binning.value != 1 or img_type.value != ASI_IMG_TYPE.ASI_IMG_RAW16:
-            print(f"resetting ROI, was ({width.value}, {height.value}, {binning.value}, {img_type.value})")
-            call(self.lib.ASISetROIFormat(self.i, self.info.MaxWidth, self.info.MaxHeight, 1, ASI_IMG_TYPE.ASI_IMG_RAW16))
+        target_fmt = ASI_IMG_TYPE.ASI_IMG_RAW16
+        if ASI_IMG_TYPE.ASI_IMG_RAW16 not in self.info.supported_formats():
+            target_fmt = ASI_IMG_TYPE.ASI_IMG_RAW8
+        if width.value != self.info.MaxWidth or height.value != self.info.MaxHeight or binning.value != 1 or img_type.value != target_fmt:
+            print(f"resetting the RoI and bit depth ({target_fmt}), was ({width.value}, {height.value}, {binning.value}, {img_type.value})")
+            call(self.lib.ASISetROIFormat(self.i, self.info.MaxWidth, self.info.MaxHeight, 1, target_fmt))
 
         startx, starty = c_int(), c_int()
-        call(self.lib.ASIGetStartPos(self.i, byref(startx), byref(starty)))
+        if startx.value != 0 or starty.value != 0:
+            print(f"resetting the center")
+            call(self.lib.ASIGetStartPos(self.i, byref(startx), byref(starty)))
 
         if startx.value != 0 or starty.value != 0:
             print(f"resetting the start pos, was ({startx.value}, {starty.value})")
