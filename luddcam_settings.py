@@ -165,7 +165,7 @@ class Menu:
         def set_camera(c):
             if c == self.camera:
                 return
-            if not c:
+            if c == None:
                 print("unsetting camera")
                 self.settings.camera = None
                 self.camera = None
@@ -173,23 +173,58 @@ class Menu:
             print(f"set camera {c.name}")
             self.settings.camera = c.name
             self.camera = c
+            if c.name == "none":
+                return
             prefs = self.camera_settings()
-            if prefs.cooling == {}:
+            if prefs.cooling == {} and c.is_cooled:
                 prefs.cooling = 0
-            if prefs.gain == {}:
+            if prefs.gain == {} and c.has_gain:
                 if c.gain_unity != None:
                     prefs.gain = c.gain_unity
                 else:
                     prefs.gain = c.gain_default
             if prefs.intervals == {}:
                 prefs.intervals = []
+            if c.is_cooled:
+                self.camera.cooling(prefs.cooling)
+        def set_guide(c):
+            if c == self.guide:
+                return
+            if c == None:
+                print("unsetting guide")
+                self.settings.guide = None
+                self.guide = None
+                return
+            print(f"set guide {c.name}")
+            self.settings.guide = c.name
+            self.guide = c
 
-            self.camera.cooling(prefs.cooling)
+        # we calculate default camera and guide first before rendering, so we
+        # can allow guide cameras to appear in the main camera list. If we
+        # have only a guide camera attached, preference is given to guiding
+        # although it can be unselected and moved.
 
-        # FIXME allow selecting the guide camera as the main camera
-        # (e.g. for planetary) and setting to <none>
+        guides = [a for a in self.guides if a != self.camera]
+        if guides:
+            guides.append(none_selected)
+            if self.settings.guide:
+                default_guide = find_index(guides, lambda c: c.name == self.settings.guide, 0)
+            else:
+                default_guide = 0
+            set_guide(guides[default_guide])
 
-        if not self.cameras:
+        cameras = [a for a in self.cameras] + [a for a in self.guides if a != self.guide]
+        print(f"cameras = {[a.name for a in cameras]}, chosen = {self.settings.camera}")
+        if cameras:
+            cameras.append(none_selected)
+            if self.settings.camera:
+                default_camera = find_index(cameras, lambda c: c.name == self.settings.camera, 0)
+            else:
+                default_camera = 0
+            print(f"default camera index = {default_camera}")
+            set_camera(cameras[default_camera])
+
+        if not cameras:
             button = menu.add.button("Camera: none", align=ALIGN_LEFT)
             button.update_font({"color": (100, 100, 100)})
             set_camera(None)
@@ -199,30 +234,14 @@ class Menu:
                     return
                 set_camera(camera)
                 self.rebuild_menus()
-            if self.camera:
-                default = find_index(self.cameras, lambda c: c.name == self.camera.name, 0)
-            else:
-                default = 0
-            set_camera(self.cameras[default])
             menu.add.selector(
                 title="Camera: ",
-                items=[(a.name, a) for a in self.cameras],
-                default=default,
+                items=[(a.name, a) for a in cameras],
+                default=default_camera,
                 onchange=select_camera,
                 align=ALIGN_LEFT)
 
-        def set_guide(c):
-            if c == self.guide:
-                return
-            if not c:
-                print("unsetting guide")
-                self.settings.guide = None
-                self.guide = None
-                return
-            print(f"set guide {c.name}")
-            self.settings.guide = c.name
-            self.guide = c
-        if not self.guides:
+        if not guides:
             button = menu.add.button("Guide: none", align=ALIGN_LEFT)
             button.update_font({"color": (100, 100, 100)})
             set_guide(None)
@@ -232,15 +251,10 @@ class Menu:
                     return
                 set_guide(guide)
                 # don't need to rebuild menus
-            if self.guide:
-                default = find_index(self.guides, lambda c: c.name == self.guide.name, 0)
-            else:
-                default = 0
-            set_guide(self.guides[default])
             menu.add.selector(
                 title="Guide: ",
-                items=[(a.name, a) for a in self.guides],
-                default=default,
+                items=[(a.name, a) for a in guides],
+                default=default_guide,
                 onchange=select_guide,
                 align=ALIGN_LEFT)
 
@@ -504,7 +518,6 @@ class Menu:
                         return
                     self.camera_settings().cooling = cooling
                     self.camera.cooling(cooling)
-
                 # range_slider doesn't work with a gamepad...
                 # https://github.com/ppizarror/pygame-menu/issues/478
                 cooling = self.camera_settings().cooling
@@ -668,3 +681,11 @@ def get_drive(relative):
         return relative
     else:
         return f"{MEDIA_BASE}"
+
+class NoCamera:
+    def __init__(self):
+        self.name = "none"
+    def __bool__(self):
+        return False
+
+none_selected = NoCamera()

@@ -221,6 +221,9 @@ class AsiCamera2:
         self.lib.ASISetROIFormat.restype = c_int
         self.lib.ASISetROIFormat.argtypes = [c_int, c_int, c_int, c_int, c_int]
 
+        self.lib.ASIGetStartPos.restype = c_int
+        self.lib.ASIGetStartPos.argtypes = [c_int, POINTER(c_int), POINTER(c_int)]
+
         self.lib.ASISetStartPos.restype = c_int
         self.lib.ASISetStartPos.argtypes = [c_int, c_int, c_int]
 
@@ -292,7 +295,7 @@ class Camera:
             caps = ASI_CONTROL_CAPS()
             call(self.lib.ASIGetControlCaps(self.i, c, byref(caps)))
             self.controls[caps.ControlType] = caps
-            # print(f"CAPS {caps.name()} = {caps.DefaultValue}")
+            print(f"CAPS {caps.name()} = {caps.DefaultValue}")
 
         self.is_cooled = ASI_CONTROL_TYPE.ASI_COOLER_ON in self.controls
 
@@ -327,6 +330,10 @@ class Camera:
             call(self.lib.ASISetCameraMode(self.i, ASI_CAMERA_MODE.ASI_MODE_NORMAL))
         call(self.lib.ASIInitCamera(self.i))
 
+        # call(self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_HARDWARE_BIN, ASI_BOOL.ASI_FALSE, ASI_BOOL.ASI_FALSE))
+        # call(self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_HIGH_SPEED_MODE, ASI_BOOL.ASI_FALSE, ASI_BOOL.ASI_FALSE))
+        # call(self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_BANDWIDTHOVERLOAD, 40, ASI_BOOL.ASI_FALSE))
+
     def temp(self):
         value = c_long()
         call(self.lib.ASIGetControlValue(self.i, ASI_CONTROL_TYPE.ASI_TEMPERATURE, byref(value), byref(c_int(ASI_BOOL.ASI_FALSE))))
@@ -353,16 +360,19 @@ class Camera:
         assert self.lib.ASIGetROIFormat(self.i, byref(width), byref(height), byref(binning), byref(img_type)) == 0
         print(f"initial roi was {width}, {height}, {binning}, {img_type}")
 
-        # these are defaults in indi, but I haven't seen a need to use them
-        # call(self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_HARDWARE_BIN, ASI_BOOL.ASI_FALSE, ASI_BOOL.ASI_FALSE))
-        # call(self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_HIGH_SPEED_MODE, ASI_BOOL.ASI_FALSE, ASI_BOOL.ASI_FALSE))
-        # call(self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_BANDWIDTHOVERLOAD, 40, ASI_BOOL.ASI_FALSE))
-
         call(self.lib.ASIStopExposure(self.i))
 
-        # TODO conditional
-        call(self.lib.ASISetROIFormat(self.i, self.info.MaxWidth, self.info.MaxHeight, 1, ASI_IMG_TYPE.ASI_IMG_RAW16))
-        call(self.lib.ASISetStartPos(self.i, 0, 0))
+        # TODO assuming 16 bit, should probably check that it's supported
+        if width != self.info.MaxWidth or height != self.info.MaxHeight or binning != 1 or img_type != ASI_IMG_TYPE.ASI_IMG_RAW16:
+            print(f"resetting ROI, was ({width.value}, {height.value}, {binning.value}, {img_type.value})")
+            call(self.lib.ASISetROIFormat(self.i, self.info.MaxWidth, self.info.MaxHeight, 1, ASI_IMG_TYPE.ASI_IMG_RAW16))
+
+        startx, starty = c_int(), c_int()
+        call(self.lib.ASIGetStartPos(self.i, byref(startx), byref(starty)))
+
+        if startx != 0 or starty != 0:
+            print(f"resetting the start pos, was ({startx.value}, {starty.value})")
+            call(self.lib.ASISetStartPos(self.i, 0, 0))
 
         v = int(exposure * 1000000)
         # print(f"DEBUG setting exposure to {v}")
