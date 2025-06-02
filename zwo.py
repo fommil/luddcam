@@ -245,6 +245,9 @@ class AsiCamera2:
         self.lib.ASISetCameraMode.restype = c_int
         self.lib.ASISetCameraMode.argtypes = [c_int, c_int]
 
+        self.lib.ASIGetGainOffset.restype = c_int
+        self.lib.ASIGetGainOffset.argtypes = [c_int, POINTER(c_int), POINTER(c_int), POINTER(c_int), POINTER(c_int)]
+
     def cameras(self):
         num_cameras = self.lib.ASIGetNumOfConnectedCameras()
         print(f"Number of connected cameras: {num_cameras}")
@@ -262,43 +265,31 @@ class Camera:
         self.name = None
         self.is_cooled = None
         self.has_gain = None
-        self.blinked = False
 
-        result = self.lib.ASIGetCameraProperty(byref(self.info), self.i)
-        if result != 0:
-            print(f"error getting camera properties {i} = {result}")
-            return
+        # NOTE there is a concept in indi known as "blinking" where multiple
+        # very short exposures are made before changing any settings. I haven't
+        # seen a need to do it.
+
+        call(self.lib.ASIGetCameraProperty(byref(self.info), self.i))
         self.name = self.info.name()
-        print(f"{self.info}")
+        # print(f"{self.info}")
 
         self.guide = bool(self.info.ST4Port)
         if self.name == "ZWO ASI1600MM Pro":
             # older models had an ST4 port
             self.guide = False
 
-        # if (result := self.lib.ASICloseCamera(self.i)) != 0:
-        #     print(f"error closing camera {i}, ignoring")
-
-        result = self.lib.ASIOpenCamera(self.i)
-        if result != 0:
-            print(f"error opening camera {i} = {result}")
-            return
+        call(self.lib.ASIOpenCamera(self.i))
 
         num_controls = c_int()
-        result = self.lib.ASIGetNumOfControls(self.i, byref(num_controls))
-        if result != 0:
-            print(f"error getting camera controls {i} = {result}")
-            return
+        call(self.lib.ASIGetNumOfControls(self.i, byref(num_controls)))
 
         self.controls = {}
         for c in range(num_controls.value):
             caps = ASI_CONTROL_CAPS()
-            result = self.lib.ASIGetControlCaps(self.i, c, byref(caps))
-            if result != 0:
-                print(f"error getting camera caps {i}, {c} = {result}")
-                continue
+            call(self.lib.ASIGetControlCaps(self.i, c, byref(caps)))
             self.controls[caps.ControlType] = caps
-            print(f"CAPS {caps.name()} = {caps.DefaultValue}")
+            # print(f"CAPS {caps.name()} = {caps.DefaultValue}")
 
         self.is_cooled = ASI_CONTROL_TYPE.ASI_COOLER_ON in self.controls
 
@@ -308,157 +299,77 @@ class Camera:
             self.gain_min = caps.MinValue
             self.gain_max = caps.MaxValue
             self.gain_default = caps.DefaultValue
-            self.gain_unity = get_unity_gain(self.name)
 
-        print(f"is trigger cam? {self.info.IsTriggerCam == ASI_BOOL.ASI_TRUE}")
+            offset_highestdr = c_int()
+            offset_unity = c_int()
+            gain_lrn = c_int()
+            offset_lrn = c_int()
+            call(self.lib.ASIGetGainOffset(self.i, byref(offset_highestdr), byref(offset_unity), byref(gain_lrn), byref(offset_lrn)))
+            # once we know two values for gain and offset we could potentially linearly extrapolate an offset for all others
+            self.gain_unity = get_unity_gain(self.name)
+            self.offset_unity = offset_unity.value
+
         if (self.info.IsTriggerCam == ASI_BOOL.ASI_TRUE):
-            if (result := self.lib.ASISetCameraMode(self.i, ASI_CAMERA_MODE.ASI_MODE_NORMAL)) != 0:
-                print(f"error setting camera to snap mode")
-                return
-        if (result := self.lib.ASIInitCamera(self.i)) != 0:
-            print(f"error init camera {self.i} {result}")
-            return
+            call(self.lib.ASISetCameraMode(self.i, ASI_CAMERA_MODE.ASI_MODE_NORMAL))
+        call(self.lib.ASIInitCamera(self.i))
 
     def temp(self):
         value = c_long()
-        if (result := self.lib.ASIGetControlValue(self.i, ASI_CONTROL_TYPE.ASI_TEMPERATURE, byref(value), byref(c_int(ASI_BOOL.ASI_FALSE)))) != 0:
-            print(f"error getting temp {self.i} {result}")
+        call(self.lib.ASIGetControlValue(self.i, ASI_CONTROL_TYPE.ASI_TEMPERATURE, byref(value), byref(c_int(ASI_BOOL.ASI_FALSE))))
         return value.value / 10.0
 
     def cooler(self):
         value = c_long()
-        if (result := self.lib.ASIGetControlValue(self.i, ASI_CONTROL_TYPE.ASI_COOLER_POWER_PERC, byref(value), byref(c_int(ASI_BOOL.ASI_FALSE)))) != 0:
-            print(f"error getting temp {self.i} {result}")
+        call(self.lib.ASIGetControlValue(self.i, ASI_CONTROL_TYPE.ASI_COOLER_POWER_PERC, byref(value), byref(c_int(ASI_BOOL.ASI_FALSE))))
         return value.value
 
     def cooling(self, temp):
         print(f"setting the target cooling of {self.name} to {temp}")
         # print("ASI_FAN_ON supported:", ASI_CONTROL_TYPE.ASI_FAN_ON in self.controls)
         if ASI_CONTROL_TYPE.ASI_FAN_ON in self.controls:
-            if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_FAN_ON, ASI_BOOL.ASI_TRUE, ASI_BOOL.ASI_FALSE)) != 0:
-                print(f"error when enabling the fan")
-                return
+            call(self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_FAN_ON, ASI_BOOL.ASI_TRUE, ASI_BOOL.ASI_FALSE))
         #print("ASI_COOLER_ON supported:", ASI_CONTROL_TYPE.ASI_COOLER_ON in self.controls)
-        if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_COOLER_ON, ASI_BOOL.ASI_TRUE, ASI_BOOL.ASI_FALSE)) != 0:
-            print(f"error when enabling the cooling")
-            return
-        if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_TARGET_TEMP, temp, ASI_BOOL.ASI_FALSE)) != 0:
-            print(f"error when setting the target temperature")
-            return
+        call(self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_COOLER_ON, ASI_BOOL.ASI_TRUE, ASI_BOOL.ASI_FALSE))
+        call(self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_TARGET_TEMP, temp, ASI_BOOL.ASI_FALSE))
 
     def capture_start(self, gain, exposure):
         print(f"capture_start for gain={gain}, exposure={exposure}")
 
-        # if we don't do this then we can't even create the first one
-        # if (result := self.lib.ASIStopExposure(self.i)) != 0:
-        #     print(f"failed to stop (potentially stale) exposures")
-        #     return
-
-        #width = self.info.MaxWidth
-        #height = self.info.MaxHeight
-        # print(f"max dims are {width}, {height}")
         width, height, binning, img_type = c_int(), c_int(), c_int(), c_int()
         assert self.lib.ASIGetROIFormat(self.i, byref(width), byref(height), byref(binning), byref(img_type)) == 0
         print(f"initial roi was {width}, {height}, {binning}, {img_type}")
 
-        # TODO turn off hardware binning and high speed mode
-        # call(self.lib.ASIStopExposure(self.i))
-        # val = c_long()
-        # auto = c_int()
-        # call(self.lib.ASIGetControlValue(self.i, ASI_CONTROL_TYPE.ASI_HARDWARE_BIN, byref(val), byref(auto)))
-        # print(f"HARDWARE_BIN: {val.value} {auto.value}")
-        call(self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_HARDWARE_BIN, ASI_BOOL.ASI_FALSE, ASI_BOOL.ASI_FALSE))
-
-        # call(self.lib.ASIGetControlValue(self.i, ASI_CONTROL_TYPE.ASI_HIGH_SPEED_MODE, byref(val), byref(auto)))
-        # print(f"HIGH_SPEED_MODE: {val.value} {auto.value}")
-        call(self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_HIGH_SPEED_MODE, ASI_BOOL.ASI_FALSE, ASI_BOOL.ASI_FALSE))
-
-        call(self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_BANDWIDTHOVERLOAD, 40, ASI_BOOL.ASI_FALSE))
-
-        # TODO check if 16 bit is supported before trying to set it
-        # before we can change the format to 16 bit we have to blink, i.e. a couple of frames
-        # with the default values. Seems to be a weird ZWO quirk. We do this in a blocking way
-        # because it's pretty quick.
-        if not self.blinked:
-            call(self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_EXPOSURE, 10000, ASI_BOOL.ASI_FALSE))
-            for i in range(2):
-                call(self.lib.ASIStartExposure(self.i, ASI_BOOL.ASI_FALSE))
-                status = c_int(ASI_EXPOSURE_STATUS.ASI_EXP_WORKING)
-                while status.value == ASI_EXPOSURE_STATUS.ASI_EXP_WORKING:
-                    call(self.lib.ASIGetExpStatus(self.i, byref(status)))
-#                    print("waiting for exposure to finish")
-                    time.sleep(0.05)
-                if status.value == ASI_EXPOSURE_STATUS.ASI_EXP_SUCCESS:
-                    print(f"blink succeeded")
-                else:
-                    print(f"blink failed with {status.value}")
-                # indi-asi doesn't stop the exposure or read from it
-#        self.blinked = True
+        # these are defaults in indi, but I haven't seen a need to use them
+        # call(self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_HARDWARE_BIN, ASI_BOOL.ASI_FALSE, ASI_BOOL.ASI_FALSE))
+        # call(self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_HIGH_SPEED_MODE, ASI_BOOL.ASI_FALSE, ASI_BOOL.ASI_FALSE))
+        # call(self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_BANDWIDTHOVERLOAD, 40, ASI_BOOL.ASI_FALSE))
 
         call(self.lib.ASIStopExposure(self.i))
-        # while (status := self.capture_wait()) != ASI_EXPOSURE_STATUS.ASI_EXP_IDLE:
-        #     print(f"waiting for idle, currently {status}")
-        #     time.sleep(0.1)
 
-        if (result := self.lib.ASISetROIFormat(self.i, width.value, height.value, binning.value, ASI_IMG_TYPE.ASI_IMG_RAW16)) != 0:
-            print(f"error setting image format {self.i} {result}")
-            return
-        # if (result := self.lib.ASISetStartPos(self.i, 0, 0)) != 0:
-        #     print(f"error resetting the roi start {self.i} {result}")
-        #     return
-
-        if not self.blinked:
-            call(self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_EXPOSURE, 10000, ASI_BOOL.ASI_FALSE))
-            for i in range(2):
-                call(self.lib.ASIStartExposure(self.i, ASI_BOOL.ASI_FALSE))
-                status = c_int(ASI_EXPOSURE_STATUS.ASI_EXP_WORKING)
-                while status.value == ASI_EXPOSURE_STATUS.ASI_EXP_WORKING:
-                    call(self.lib.ASIGetExpStatus(self.i, byref(status)))
-#                    print("waiting for exposure to finish")
-                    time.sleep(0.05)
-                if status.value == ASI_EXPOSURE_STATUS.ASI_EXP_SUCCESS:
-                    print(f"blink succeeded")
-                else:
-                    print(f"blink failed with {status.value}")
-#        self.blinked = True
-
-        # assert self.lib.ASIGetROIFormat(self.i, byref(width), byref(height), byref(binning), byref(img_type)) == 0
-        # print(f"updated roi is {width}, {height}, {binning}, {img_type}")
+        # TODO conditional
+        call(self.lib.ASISetROIFormat(self.i, self.info.MaxWidth, self.info.MaxHeight, 1, ASI_IMG_TYPE.ASI_IMG_RAW16))
+        call(self.lib.ASISetStartPos(self.i, 0, 0))
 
         v = int(exposure * 1000000)
         # print(f"DEBUG setting exposure to {v}")
-        if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_EXPOSURE, v, ASI_BOOL.ASI_FALSE)) != 0:
-            print(f"error setting exposure {self.i} {result}")
-            return
+        call(self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_EXPOSURE, v, ASI_BOOL.ASI_FALSE))
 
-        v = int(gain)
-        # print(f"DEBUG setting gain to {v}")
-        if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_GAIN, v, ASI_BOOL.ASI_FALSE)) != 0:
-            print(f"error setting gain {self.i} {result}")
-            return
+        if gain != None:
+            v = int(gain)
+            # print(f"DEBUG setting gain to {v}")
+            call(self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_GAIN, v, ASI_BOOL.ASI_FALSE))
 
-        # FIXME user configurable offset
-        # v = int(50)
-        # if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_OFFSET, v, ASI_BOOL.ASI_FALSE)) != 0:
-        #     print(f"error setting offset (brightness) {self.i} {result}")
-        #     return
+            v = int(self.infer_offset(gain))
+            print(f"setting offset = {v} for gain = {gain}")
+            call(self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_OFFSET, v, ASI_BOOL.ASI_FALSE))
 
-        # v = int(40)
-        # if (result := self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_BANDWIDTHOVERLOAD, v, ASI_BOOL.ASI_FALSE)) != 0:
-        #     print(f"error setting bandwidth {self.i} {result}")
-        #     return
-
-        if (result := self.lib.ASIStartExposure(self.i, ASI_BOOL.ASI_FALSE)) != 0:
-            print(f"error starting the capture {self.i} {result}")
-            return
+        call(self.lib.ASIStartExposure(self.i, ASI_BOOL.ASI_FALSE))
 
         return True
 
     def capture_wait(self):
         status = c_int()
-        if (result := self.lib.ASIGetExpStatus(self.i, byref(status))) != 0:
-            print(f"error getting exp status for {self.i} ASI_ERROR_CODE={result}")
-            return -1
+        call(self.lib.ASIGetExpStatus(self.i, byref(status)))
         return status.value
 
     # could allow reusing buffers...
@@ -467,15 +378,15 @@ class Camera:
         height = self.info.MaxHeight
         buf_len = width * height * 2 # RAW16
         buf = (c_ubyte * buf_len)()
-        if (result := self.lib.ASIGetDataAfterExp(self.i, buf, buf_len)) != 0:
-            print(f"error getting data {self.i} {result}")
-            return
-
-        if (result := self.lib.ASIStopExposure(self.i)) != 0:
-            print(f"failed to stop the exposure")
+        call(self.lib.ASIGetDataAfterExp(self.i, buf, buf_len))
+        call(self.lib.ASIStopExposure(self.i))
 
         img_array = np.ctypeslib.as_array(buf)
         return img_array.view(np.uint16).reshape(height, width)
+
+    def infer_offset(self, gain):
+        # FIXME implement
+        return self.offset_unity
 
 class EFW_INFO(Structure):
     _fields_ = [
@@ -555,22 +466,14 @@ class Wheel:
         # calibrate should be unnecessary because it happens on startup.
         #
         # set/get/calibrate are all async.
-        result = self.lib.EFWOpen(self.i)
-        if result != 0:
-            print(f"EFWOpen failed for index {self.i} with error code {result}")
-            return
+        call(self.lib.EFWOpen(self.i))
         self.info = EFW_INFO()
-        result = self.lib.EFWGetProperty(self.i, byref(self.info))
-        if result != 0:
-            print(f"EFWGetProperty failed for index {self.i} with error code {result}")
-            return
+        call(self.lib.EFWGetProperty(self.i, byref(self.info)))
         self.name = self.info.identifier()
         self.slots = self.info.slotNum
 
     def calibrate(self):
-        result = self.lib.EFWCalibrate(self.i)
-        if result != 0:
-            print(f"EFWCalibrate failed for wheel {self.i} with error code {result}")
+        call(self.lib.EFWCalibrate(self.i))
 
 def get_normalized_arch():
     raw = platform.machine().lower()
@@ -581,8 +484,9 @@ def get_normalized_arch():
     else:
         return "unknown"
 
-# TODO replace this hacky lookup with a call to ASIGetGainOffset
-# collected by chatgpt from forums
+# super weird, ZWO give the offsets for unity gain but not the unity gain value
+# so we have to figure them out from published data. collected by chatgpt from
+# forums.
 def get_unity_gain(camera_name):
     model_map = {
         "ASI1600MM": 139,

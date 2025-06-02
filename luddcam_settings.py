@@ -520,7 +520,6 @@ class Menu:
 
             # TODO binning
             # TODO anti-dew heater
-            # TODO offset
 
             if self.camera.has_gain:
                 def update_gain(a, gain):
@@ -543,6 +542,7 @@ class Menu:
                     default=options.index(gain),
                     onchange=update_gain,
                     align=ALIGN_LEFT)
+
 
         initialized = True
 
