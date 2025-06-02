@@ -6,17 +6,23 @@ Hopefully this will be one-click when I package it up as a `.deb` file.
 
 ## Windows / Mac
 
-This currently only works on a Linux desktop (or raspberry pi), ping me if you're interested.
+This is only tested on a Linux Linux desktop and Raspberry pi but it should work cross platform if the Linux instructions are converted, e.g. homebrew instead of apt, and might require using `pip` directly for python dependencies.
 
 ## Linux
 
 If you're on a desktop like Debian you may need to enable `non-free` or `contrib` to get access to ZWO libs, but these should be available on a standard raspberry pi by default:
 
 ```
-sudo apt install python3-pygame python3-box devmon udevil exfat-fuse fonts-hack libasi
+sudo apt install libasi python3-pygame python3-box devmon udevil exfat-fuse fonts-hack
 
 # workaround bug in raspberry pi devmon/exfat support
 sudo ln -s mount.exfat-fuse /usr/sbin/mount.exfat
+```
+
+And we need some python dependencies that are not packaged already for the Raspberry pi
+
+```
+python3 -m pip install --user --break-system-packages pygame_menu
 ```
 
 To have permissions to format drives, you may need to have a suitable sudoer entry in `/etc/sudoers.d/` (this is not necessary on the raspberry pi)
@@ -26,7 +32,24 @@ echo "${USER} ALL=(ALL) NOPASSWD: /sbin/mkfs.*" | sudo tee /etc/sudoers.d/format
 sudo chmod 0440 /etc/sudoers.d/format
 ```
 
-# LuddCam
+Then install the source code itself
+
+```
+git clone git@github.com:fommil/luddcam.git
+cd luddcam
+```
+
+# Running
+
+## Developer / Desktop
+
+It should "just work" if you run
+
+```
+python3 luddcam.py
+```
+
+## Auto Start (Raspberry Pi)
 
 We'll define it as a user service and turn off the desktop.
 
@@ -41,12 +64,6 @@ sudo raspi-config
 Then check out this repo and install the required services:
 
 ```
-git clone git@github.com:fommil/luddcam.git
-cd luddcam
-
-# this installs things as the user, not system-wide
-python3 -m pip install --user --break-system-packages pygame_menu
-
 mkdir -p ~/.config/systemd/user
 ln -s $PWD/luddcam.service ~/.config/systemd/user/
 

@@ -28,12 +28,6 @@ import zwo
 ALIGN_LEFT=pygame_menu.locals.ALIGN_LEFT
 ALIGN_RIGHT=pygame_menu.locals.ALIGN_RIGHT
 
-# FIXME abstract over MEDIA_BASE by platform
-#
-# we assume that all removable media shows up here. We're intentionally
-# limiting portability to Linux to simplify the code.
-MEDIA_BASE = f"/media/{os.getlogin()}/"
-
 # lets users optionally name their filter slots
 FILTER_OPTIONS = ["undefined", "L", "R", "G", "B", "Sii", "Ha", "Oiii", "Ha Oiii", "Ha Oiii Hb", "Sii Oiii", "Dark" ]
 
@@ -140,6 +134,10 @@ class Menu:
         menu.draw(pygame.display.get_surface())
 
     def format_drive(self):
+        if sys.platform != "linux":
+            print(f"ERROR: 'format' is not supported on {sys.platform}")
+            return
+
         drive = self.settings.drive
         print(f"Formatting {drive}")
         mnt = run(f"findmnt --noheadings --output=SOURCE --target {MEDIA_BASE}{drive}")
@@ -289,7 +287,7 @@ class Menu:
                 return
             print(f"set drive {d}")
             self.settings.drive = d
-        drives = os.listdir(MEDIA_BASE)
+        drives = list_drives()
         if not drives:
             button = menu.add.button("Drive: none", align=ALIGN_LEFT)
             button.update_font({"color": (100, 100, 100)})
@@ -650,3 +648,25 @@ def is_button(event):
 # how is this not in the stdlib?
 def find_index(lst, pred, default=None):
     return next((i for i, x in enumerate(lst) if pred(x)), default)
+
+# assume removable media shows up here on Linux (i.e. devmon / udisk)
+if sys.platform == "linux":
+    MEDIA_BASE = f"/media/{os.getlogin()}/"
+elif sys.platform == "darwin":
+    MEDIA_BASE = "/Volumes/"
+
+def list_drives():
+    if sys.platform == "win32":
+        import win32file
+        return [
+            f"{d}:\\" for d in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            if win32file.GetDriveType(f"{d}:\\") == win32file.DRIVE_REMOVABLE
+        ]
+    else:
+        os.listdir(MEDIA_BASE)
+
+def get_drive(relative):
+    if sys.platform == "win32":
+        return relative:
+    else:
+        return f"{MEDIA_BASE}"
