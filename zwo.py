@@ -248,6 +248,9 @@ class AsiCamera2:
         self.lib.ASIGetGainOffset.restype = c_int
         self.lib.ASIGetGainOffset.argtypes = [c_int, POINTER(c_int), POINTER(c_int), POINTER(c_int), POINTER(c_int)]
 
+        self.lib.ASIGetLMHGainOffset.restype = c_int
+        self.lib.ASIGetLMHGainOffset.argtypes = [c_int, POINTER(c_int), POINTER(c_int), POINTER(c_int), POINTER(c_int)]
+
     def cameras(self):
         num_cameras = self.lib.ASIGetNumOfConnectedCameras()
         print(f"Number of connected cameras: {num_cameras}")
@@ -300,14 +303,25 @@ class Camera:
             self.gain_max = caps.MaxValue
             self.gain_default = caps.DefaultValue
 
-            offset_highestdr = c_int()
+            # assume hdr = gain_min
+            offset_hdr = c_int()
             offset_unity = c_int()
             gain_lrn = c_int()
             offset_lrn = c_int()
-            call(self.lib.ASIGetGainOffset(self.i, byref(offset_highestdr), byref(offset_unity), byref(gain_lrn), byref(offset_lrn)))
-            # once we know two values for gain and offset we could potentially linearly extrapolate an offset for all others
+            call(self.lib.ASIGetGainOffset(self.i, byref(offset_hdr), byref(offset_unity), byref(gain_lrn), byref(offset_lrn)))
+
             self.gain_unity = get_unity_gain(self.name)
-            self.offset_unity = offset_unity.value
+
+            # seems unlikely that we would have gain without offset, but play it safe
+            if ASI_CONTROL_TYPE.ASI_OFFSET in self.controls:
+                self.offset_hdr = offset_hdr.value
+                self.gain_lrn = gain_lrn.value
+                self.offset_lrn = offset_lrn.value
+                self.offset_unity = offset_unity.value
+                caps = self.controls[ASI_CONTROL_TYPE.ASI_OFFSET]
+                self.offset_min = caps.MinValue
+                self.offset_max = caps.MaxValue
+                print(f"HDR = ({self.gain_min}, {self.offset_hdr}), UNITY = ({self.gain_unity}, {self.offset_unity}), LRN = ({self.gain_lrn}, {self.offset_lrn})")
 
         if (self.info.IsTriggerCam == ASI_BOOL.ASI_TRUE):
             call(self.lib.ASISetCameraMode(self.i, ASI_CAMERA_MODE.ASI_MODE_NORMAL))
@@ -359,9 +373,10 @@ class Camera:
             # print(f"DEBUG setting gain to {v}")
             call(self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_GAIN, v, ASI_BOOL.ASI_FALSE))
 
-            v = int(self.infer_offset(gain))
-            print(f"setting offset = {v} for gain = {gain}")
-            call(self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_OFFSET, v, ASI_BOOL.ASI_FALSE))
+            if ASI_CONTROL_TYPE.ASI_OFFSET in self.controls:
+                v = int(self.infer_offset(gain))
+                print(f"setting offset = {v} for gain = {gain}")
+                call(self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_OFFSET, v, ASI_BOOL.ASI_FALSE))
 
         call(self.lib.ASIStartExposure(self.i, ASI_BOOL.ASI_FALSE))
 
@@ -384,9 +399,25 @@ class Camera:
         img_array = np.ctypeslib.as_array(buf)
         return img_array.view(np.uint16).reshape(height, width)
 
+    # we know the offset for highest dynamic range (~lowest gain) and lowest
+    # read noise (~highest gain), and the offset for unity gain. That gives us
+    # two slopes, so depending on which gain we have we can infer an appropriate
+    # offset. Power users would probably want to set this manually, and we may
+    # make that available through configuration or something, but this is best
+    # left automated.
     def infer_offset(self, gain):
-        # FIXME implement
-        return self.offset_unity
+        if gain == self.gain_unity:
+            return self.offset_unity
+        def infer(x1, x2, y1, y2):
+            m = (y2 - y1) / (x2 - x1)
+            v = y1 + m * (gain - x1)
+            return max(self.offset_min, min(int(v), self.offset_max))
+        if not self.gain_unity:
+            return infer(self.gain_min, self.gain_lrn, self.offset_hdr, self.offset_lrn)
+        if gain < self.gain_unity:
+            return infer(self.gain_min, self.gain_unity, self.offset_hdr, self.offset_unity)
+        if gain > self.gain_unity:
+            return infer(self.gain_unity, self.gain_lrn, self.offset_unity, self.offset_lrn)
 
 class EFW_INFO(Structure):
     _fields_ = [
@@ -489,6 +520,10 @@ def get_normalized_arch():
 # forums.
 def get_unity_gain(camera_name):
     model_map = {
+        "ASI120MM": 30, # 12 bit mode
+        "ASI120MC": 30, # 12 bit mode
+        "ASI220MM": 68,
+        "ASI220MC": 68,
         "ASI1600MM": 139,
         "ASI1600MC": 139,
         "ASI294MM": 120,

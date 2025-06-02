@@ -562,8 +562,6 @@ class Menu:
 # enable automatic object tracking in boost mode
 # enable autostretching in live / playback
 
-# FIXME abstract out all uses of run so we can be multi-platform (at least partially)
-#
 # convenient want to shell out. If we want to make this portable, we'd need
 # to find all uses of this and use portable python libraries instead of
 # linux commands.
@@ -667,6 +665,6 @@ def list_drives():
 
 def get_drive(relative):
     if sys.platform == "win32":
-        return relative:
+        return relative
     else:
         return f"{MEDIA_BASE}"
