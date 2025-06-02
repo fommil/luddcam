@@ -176,15 +176,16 @@ class Menu:
             if c.name == "none":
                 return
             prefs = self.camera_settings()
-            if prefs.cooling == {} and c.is_cooled:
+            if c.is_cooled and prefs.cooling == {}:
                 prefs.cooling = 0
-            if prefs.gain == {} and c.has_gain:
+            if c.has_gain and prefs.gain == {}:
                 if c.gain_unity != None:
                     prefs.gain = c.gain_unity
                 else:
                     prefs.gain = c.gain_default
             if prefs.intervals == {}:
                 prefs.intervals = []
+            # turn on cooling as soon as we can!
             if c.is_cooled:
                 self.camera.cooling(prefs.cooling)
         def set_guide(c):
@@ -214,20 +215,18 @@ class Menu:
             set_guide(guides[default_guide])
 
         cameras = [a for a in self.cameras] + [a for a in self.guides if a != self.guide]
-        print(f"cameras = {[a.name for a in cameras]}, chosen = {self.settings.camera}")
         if cameras:
             cameras.append(none_selected)
             if self.settings.camera:
                 default_camera = find_index(cameras, lambda c: c.name == self.settings.camera, 0)
             else:
                 default_camera = 0
-            print(f"default camera index = {default_camera}")
             set_camera(cameras[default_camera])
 
         if not cameras:
             button = menu.add.button("Camera: none", align=ALIGN_LEFT)
             button.update_font({"color": (100, 100, 100)})
-            set_camera(None)
+            set_camera(none_selected)
         else:
             def select_camera(a, camera):
                 if not initialized or self.camera == camera:
@@ -244,13 +243,13 @@ class Menu:
         if not guides:
             button = menu.add.button("Guide: none", align=ALIGN_LEFT)
             button.update_font({"color": (100, 100, 100)})
-            set_guide(None)
+            set_guide(none_selected)
         else:
             def select_guide(a, guide):
                 if not initialized or self.guide == guide:
                     return
                 set_guide(guide)
-                # don't need to rebuild menus
+                self.rebuild_menus()
             menu.add.selector(
                 title="Guide: ",
                 items=[(a.name, a) for a in guides],

@@ -358,19 +358,19 @@ class Camera:
 
         width, height, binning, img_type = c_int(), c_int(), c_int(), c_int()
         assert self.lib.ASIGetROIFormat(self.i, byref(width), byref(height), byref(binning), byref(img_type)) == 0
-        print(f"initial roi was {width}, {height}, {binning}, {img_type}")
+        # print(f"initial roi was {width}, {height}, {binning}, {img_type}")
 
         call(self.lib.ASIStopExposure(self.i))
 
         # TODO assuming 16 bit, should probably check that it's supported
-        if width != self.info.MaxWidth or height != self.info.MaxHeight or binning != 1 or img_type != ASI_IMG_TYPE.ASI_IMG_RAW16:
+        if width.value != self.info.MaxWidth or height.value != self.info.MaxHeight or binning.value != 1 or img_type.value != ASI_IMG_TYPE.ASI_IMG_RAW16:
             print(f"resetting ROI, was ({width.value}, {height.value}, {binning.value}, {img_type.value})")
             call(self.lib.ASISetROIFormat(self.i, self.info.MaxWidth, self.info.MaxHeight, 1, ASI_IMG_TYPE.ASI_IMG_RAW16))
 
         startx, starty = c_int(), c_int()
         call(self.lib.ASIGetStartPos(self.i, byref(startx), byref(starty)))
 
-        if startx != 0 or starty != 0:
+        if startx.value != 0 or starty.value != 0:
             print(f"resetting the start pos, was ({startx.value}, {starty.value})")
             call(self.lib.ASISetStartPos(self.i, 0, 0))
 
