@@ -1,6 +1,7 @@
 # The live / capture mode. When this mode is selected a Thread is spawned which
 # continually updates (with minimum/maximum exposures) a buffer that is
-# displayed on the pygame surface.
+# displayed on the pygame surface. Threads are fine here because the C calls
+# won't block the GIL and there's not much CPU work.
 #
 # The following icons are overlaid to give some indication of status:
 #
