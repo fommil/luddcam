@@ -13,16 +13,15 @@ Sometimes we just want to take the best picture possible and that's not possible
 Start with a score of 10 and deduct a point for every one of the following that you use in a picture:
 
 - any kind of wireless connection
-- assisted polar alignment (more than looking in a polar scope)
+- computer assisted polar alignment
 - GOTO to find the target
-- plate solving to find the target (allowed after framing)
-- guiding with a guide camera (manually tuned PEC is allowed)
+- plate solving to find the target
+- guiding with a guide camera
 - automated flat panels
 - automated rotation
 - automated filter changes
 - automated focus
-- AI assisted denoising
-- AI assisted star removal
+- AI assisted post-processing
 
 and be proud to share that score in your pictures, no matter what it is. There's really no wrong answer so long as you enjoy it!
 

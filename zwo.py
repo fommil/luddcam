@@ -463,32 +463,26 @@ class EfwFilter:
         self.lib.EFWGetNum.restype = c_int
         self.lib.EFWGetNum.argtypes = []
 
-        self.lib.EFWGetID.restype = c_int  # EFW_ERROR_CODE
-        self.lib.EFWGetID.argtypes = [c_int, POINTER(c_int)]
-
         self.lib.EFWGetProperty.restype = c_int  # EFW_ERROR_CODE
         self.lib.EFWGetProperty.argtypes = [c_int, POINTER(EFW_INFO)]
 
         self.lib.EFWOpen.restype = c_int  # EFW_ERROR_CODE
         self.lib.EFWOpen.argtypes = [c_int]
 
-        self.lib.EFWGetPosition.restype = c_int  # EFW_ERROR_CODE
-        self.lib.EFWGetPosition.argtypes = [c_int, POINTER(c_int)]
+        # self.lib.EFWGetPosition.restype = c_int  # EFW_ERROR_CODE
+        # self.lib.EFWGetPosition.argtypes = [c_int, POINTER(c_int)]
 
-        self.lib.EFWSetPosition.restype = c_int  # EFW_ERROR_CODE
-        self.lib.EFWSetPosition.argtypes = [c_int, c_int]
+        # self.lib.EFWSetPosition.restype = c_int  # EFW_ERROR_CODE
+        # self.lib.EFWSetPosition.argtypes = [c_int, c_int]
 
-        self.lib.EFWSetDirection.restype = c_int  # EFW_ERROR_CODE
-        self.lib.EFWSetDirection.argtypes = [c_int, c_bool]
+        # self.lib.EFWSetDirection.restype = c_int  # EFW_ERROR_CODE
+        # self.lib.EFWSetDirection.argtypes = [c_int, c_bool]
 
-        self.lib.EFWGetDirection.restype = c_int  # EFW_ERROR_CODE
-        self.lib.EFWGetDirection.argtypes = [c_int, POINTER(c_bool)]
+        # self.lib.EFWGetDirection.restype = c_int  # EFW_ERROR_CODE
+        # self.lib.EFWGetDirection.argtypes = [c_int, POINTER(c_bool)]
 
-        self.lib.EFWClose.restype = c_int  # EFW_ERROR_CODE
-        self.lib.EFWClose.argtypes = [c_int]
-
-        self.lib.EFWGetProductIDs.restype = c_int  # returns length of array
-        self.lib.EFWGetProductIDs.argtypes = [POINTER(c_int)]
+        # self.lib.EFWClose.restype = c_int  # EFW_ERROR_CODE
+        # self.lib.EFWClose.argtypes = [c_int]
 
         self.lib.EFWCalibrate.restype = c_int  # EFW_ERROR_CODE
         self.lib.EFWCalibrate.argtypes = [c_int]
