@@ -49,4 +49,4 @@ Installation is currently a bit tricky, but I'm working on making it a single cl
 
 For version 2 we're going to go custom hardware for folk with a 3d printer. I want it to look even more like a DSLR. This is a mockup of how I imagine it might look (with buttons on the top for the menu and shutter):
 
-![v2 prototype](v2.png)
+![v2 prototype](v2.jpg)
