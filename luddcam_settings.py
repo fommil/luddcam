@@ -187,7 +187,10 @@ class Menu:
                 prefs.intervals = []
             # turn on cooling as soon as we can!
             if c.is_cooled:
-                self.camera.cooling(prefs.cooling)
+                self.camera.set_cooling(prefs.cooling)
+            if c.has_gain:
+                self.camera.set_gain(prefs.gain)
+
         def set_guide(c):
             if c == self.guide:
                 return
@@ -199,6 +202,17 @@ class Menu:
             print(f"set guide {c.name}")
             self.settings.guide = c.name
             self.guide = c
+            if not c:
+                return
+            # we don't expose guide settings directly, but if the user ever
+            # selected this guide camera as a main camera then there may be
+            # preferences to take into account.
+            if len(prefs := self.settings.cameras.get(c.name)) > 0:
+                print(f"considering preferences for guide camera {prefs}")
+                if c.is_cooled and prefs.cooling != {}:
+                    self.guide.set_cooling(prefs.cooling)
+                if c.has_gain and prefs.gain != {}:
+                    self.guide.set_gain(prefs.gain)
 
         # we calculate default camera and guide first before rendering, so we
         # can allow guide cameras to appear in the main camera list. If we
@@ -516,7 +530,7 @@ class Menu:
                     if not initialized or cooling == self.camera_settings().cooling:
                         return
                     self.camera_settings().cooling = cooling
-                    self.camera.cooling(cooling)
+                    self.camera.set_cooling(cooling)
                 # range_slider doesn't work with a gamepad...
                 # https://github.com/ppizarror/pygame-menu/issues/478
                 cooling = self.camera_settings().cooling
@@ -536,6 +550,7 @@ class Menu:
                     if not initialized or gain == self.camera_settings().gain:
                         return
                     self.camera_settings().gain = gain
+                    self.camera.set_gain(gain)
                     print(f"changed camera gain to {gain}")
                 gain = self.camera_settings().gain
                 start = self.camera.gain_min
@@ -684,6 +699,8 @@ def get_drive(relative):
 class NoCamera:
     def __init__(self):
         self.name = "none"
+        #self.is_cooled = False
+        #self.has_gain = False
     def __bool__(self):
         return False
 

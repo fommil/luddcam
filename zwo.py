@@ -2,6 +2,10 @@
 # and then swap to using indilib for maximum device support. This
 # assumes that libasi has been installed already so that the native
 # libs are available on the LD path.
+#
+# https://github.com/indilib/pyindi-client
+# https://www.indilib.org/api/index.html
+# https://indilib.org/forum/development/15497-zwo-unity-gain-and-offset-calculations.html
 
 from ctypes import *
 from enum import IntEnum
@@ -299,7 +303,7 @@ class Camera:
             caps = ASI_CONTROL_CAPS()
             call(self.lib.ASIGetControlCaps(self.i, c, byref(caps)))
             self.controls[caps.ControlType] = caps
-            print(f"CAPS {caps.name()} = {caps.DefaultValue}")
+            # print(f"CAPS {caps.name()} = {caps.DefaultValue} ({caps.MinValue, caps.MaxValue}) auto={caps.IsAutoSupported == ASI_BOOL.ASI_TRUE}")
 
         self.is_cooled = ASI_CONTROL_TYPE.ASI_COOLER_ON in self.controls
 
@@ -310,7 +314,8 @@ class Camera:
             self.gain_max = caps.MaxValue
             self.gain_default = caps.DefaultValue
 
-            # assume hdr = gain_min
+            # assume hdr = gain_min,
+            # although maybe we should use ASIGetLMHGainOffset and use the "low gain"
             offset_hdr = c_int()
             offset_unity = c_int()
             gain_lrn = c_int()
@@ -348,7 +353,7 @@ class Camera:
         call(self.lib.ASIGetControlValue(self.i, ASI_CONTROL_TYPE.ASI_COOLER_POWER_PERC, byref(value), byref(c_int(ASI_BOOL.ASI_FALSE))))
         return value.value
 
-    def cooling(self, temp):
+    def set_cooling(self, temp):
         print(f"setting the target cooling of {self.name} to {temp}")
         # print("ASI_FAN_ON supported:", ASI_CONTROL_TYPE.ASI_FAN_ON in self.controls)
         if ASI_CONTROL_TYPE.ASI_FAN_ON in self.controls:
@@ -357,15 +362,27 @@ class Camera:
         call(self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_COOLER_ON, ASI_BOOL.ASI_TRUE, ASI_BOOL.ASI_FALSE))
         call(self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_TARGET_TEMP, temp, ASI_BOOL.ASI_FALSE))
 
-    def capture_start(self, gain, exposure):
-        print(f"capture_start for gain={gain}, exposure={exposure}")
+    def set_gain(self, gain):
+        v = int(gain)
+        print(f"setting gain = {gain} for {self.name}")
+        call(self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_GAIN, v, ASI_BOOL.ASI_FALSE))
 
-        width, height, binning, img_type = c_int(), c_int(), c_int(), c_int()
-        assert self.lib.ASIGetROIFormat(self.i, byref(width), byref(height), byref(binning), byref(img_type)) == 0
-        # print(f"initial roi was {width}, {height}, {binning}, {img_type}")
+        # older cameras need this, but newer ones have it auto-set in firmware
+        if ASI_CONTROL_TYPE.ASI_OFFSET in self.controls:
+            v = int(self.infer_offset(gain))
+            print(f"setting offset = {v} (for gain = {gain}) for {self.name}")
+            call(self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_OFFSET, v, ASI_BOOL.ASI_FALSE))
 
+    def capture_start(self, exposure):
+        print(f"capture_start for exposure={exposure}")
+
+        # safety
         call(self.lib.ASIStopExposure(self.i))
 
+        # we might want to move the RoI setup elsewhere but this is safe incase
+        # the user swaps between ROI video and image capture modes.
+        width, height, binning, img_type = c_int(), c_int(), c_int(), c_int()
+        assert self.lib.ASIGetROIFormat(self.i, byref(width), byref(height), byref(binning), byref(img_type)) == 0
         target_fmt = ASI_IMG_TYPE.ASI_IMG_RAW16
         if ASI_IMG_TYPE.ASI_IMG_RAW16 not in self.info.supported_formats():
             target_fmt = ASI_IMG_TYPE.ASI_IMG_RAW8
@@ -374,31 +391,15 @@ class Camera:
             call(self.lib.ASISetROIFormat(self.i, self.info.MaxWidth, self.info.MaxHeight, 1, target_fmt))
 
         startx, starty = c_int(), c_int()
-        if startx.value != 0 or starty.value != 0:
-            print(f"resetting the center")
-            call(self.lib.ASIGetStartPos(self.i, byref(startx), byref(starty)))
-
+        call(self.lib.ASIGetStartPos(self.i, byref(startx), byref(starty)))
         if startx.value != 0 or starty.value != 0:
             print(f"resetting the start pos, was ({startx.value}, {starty.value})")
             call(self.lib.ASISetStartPos(self.i, 0, 0))
 
         v = int(exposure * 1000000)
-        # print(f"DEBUG setting exposure to {v}")
         call(self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_EXPOSURE, v, ASI_BOOL.ASI_FALSE))
 
-        if gain != None:
-            v = int(gain)
-            # print(f"DEBUG setting gain to {v}")
-            call(self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_GAIN, v, ASI_BOOL.ASI_FALSE))
-
-            if ASI_CONTROL_TYPE.ASI_OFFSET in self.controls:
-                v = int(self.infer_offset(gain))
-                print(f"setting offset = {v} for gain = {gain}")
-                call(self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_OFFSET, v, ASI_BOOL.ASI_FALSE))
-
         call(self.lib.ASIStartExposure(self.i, ASI_BOOL.ASI_FALSE))
-
-        return True
 
     def capture_wait(self):
         status = c_int()
@@ -583,13 +584,14 @@ class ZwoError(Exception):
 if __name__ == '__main__':
     api = AsiCamera2()
     cameras = api.cameras()
-    assert len(cameras) == 1
+    assert len(cameras) > 0
     camera = cameras[0]
 
-    camera.cooling(0)
+    camera.set_cooling(0)
+    camera.set_gain(camera.gain_unity)
     # time.sleep(10)
 
-    camera.capture_start(100, 1)
+    camera.capture_start(1)
     time.sleep(1)
     while True:
         status = camera.capture_wait()

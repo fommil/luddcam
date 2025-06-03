@@ -172,8 +172,8 @@ def main():
                     if camera.is_cooled:
                         print(f"cooler is {camera.cooler()}%")
                     #print(f"starting a capture on {camera.name} with gain {gain}")
-                    if camera.capture_start(gain, 1):
-                        capturing = True
+                    camera.capture_start(1)
+                    capturing = True
                 else:
                     status = camera.capture_wait()
                     if status == 1:
