@@ -313,27 +313,27 @@ class Camera:
             self.gain_min = caps.MinValue
             self.gain_max = caps.MaxValue
             self.gain_default = caps.DefaultValue
-
-            # assume hdr = gain_min,
-            # although maybe we should use ASIGetLMHGainOffset and use the "low gain"
-            offset_hdr = c_int()
-            offset_unity = c_int()
-            gain_lrn = c_int()
-            offset_lrn = c_int()
-            call(self.lib.ASIGetGainOffset(self.i, byref(offset_hdr), byref(offset_unity), byref(gain_lrn), byref(offset_lrn)))
-
             self.gain_unity = get_unity_gain(self.name)
 
             # seems unlikely that we would have gain without offset, but play it safe
             if ASI_CONTROL_TYPE.ASI_OFFSET in self.controls:
-                self.offset_hdr = offset_hdr.value
-                self.gain_lrn = gain_lrn.value
-                self.offset_lrn = offset_lrn.value
-                self.offset_unity = offset_unity.value
+                pOffset_HighestDR, pOffset_UnityGain, pGain_LowestRN, pOffset_LowestRN = c_int(), c_int(), c_int(), c_int()
+                call(self.lib.ASIGetGainOffset(self.i, byref(pOffset_HighestDR), byref(pOffset_UnityGain), byref(pGain_LowestRN), byref(pOffset_LowestRN)))
+                #print(f"ASIGetGainOffset({self.i}, {pOffset_HighestDR.value}, {pOffset_UnityGain.value}, {pGain_LowestRN.value}, {pOffset_LowestRN.value})")
+
+                pLGain, pMGain, pHGain, pHOffset = c_int(), c_int(), c_int(), c_int()
+                call(self.lib.ASIGetLMHGainOffset(self.i, byref(pLGain), byref(pMGain), byref(pHGain), byref(pHOffset)))
+                #print(f"ASIGetLMHGainOffset({self.i}, {pLGain.value}, {pMGain.value}, {pHGain.value}, {pHOffset.value})")
+                # could potentially set gain_{min,max} based on pLGain, pHGain
+
+                self.gain_hdr = pLGain.value # bit of an assumption...
+                self.offset_hdr = pOffset_HighestDR.value
+                self.gain_lrn = pGain_LowestRN.value
+                self.offset_lrn = pOffset_LowestRN.value
+                self.offset_unity = pOffset_UnityGain.value
                 caps = self.controls[ASI_CONTROL_TYPE.ASI_OFFSET]
                 self.offset_min = caps.MinValue
                 self.offset_max = caps.MaxValue
-                print(f"HDR = ({self.gain_min}, {self.offset_hdr}), UNITY = ({self.gain_unity}, {self.offset_unity}), LRN = ({self.gain_lrn}, {self.offset_lrn})")
 
         if (self.info.IsTriggerCam == ASI_BOOL.ASI_TRUE):
             call(self.lib.ASISetCameraMode(self.i, ASI_CAMERA_MODE.ASI_MODE_NORMAL))
@@ -432,9 +432,9 @@ class Camera:
             v = y1 + m * (gain - x1)
             return max(self.offset_min, min(int(v), self.offset_max))
         if not self.gain_unity:
-            return infer(self.gain_min, self.gain_lrn, self.offset_hdr, self.offset_lrn)
+            return infer(self.gain_hdr, self.gain_lrn, self.offset_hdr, self.offset_lrn)
         if gain < self.gain_unity:
-            return infer(self.gain_min, self.gain_unity, self.offset_hdr, self.offset_unity)
+            return infer(self.gain_hdr, self.gain_unity, self.offset_hdr, self.offset_unity)
         if gain > self.gain_unity:
             return infer(self.gain_unity, self.gain_lrn, self.offset_unity, self.offset_lrn)
 
