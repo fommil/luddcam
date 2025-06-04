@@ -153,6 +153,7 @@ class Menu:
         initialized = False
         menu = mk_menu()
         menu.add.button(f"Devices              1 / {len(self.menus)}", align=ALIGN_RIGHT)
+        menu.add.vertical_margin(10)
 
         # the general approach here is: if you don't want to use something then
         # don't attach it. That way everything "just works" by default if it is
@@ -288,6 +289,8 @@ class Menu:
             prefs = self.wheel_settings()
             if len(prefs.filters) != self.wheel.slots:
                 prefs.filters = [None] * self.wheel.slots
+            if prefs.default == {}:
+                prefs.default = 0
         if not self.wheels:
             button = menu.add.button("Filter Wheel: none", align=ALIGN_LEFT)
             button.update_font({"color": (100, 100, 100)})
@@ -353,12 +356,38 @@ class Menu:
     def mk_filters(self):
         initialized = False
         menu = mk_menu()
-        menu.add.button(f"Filter Wheels           2 / {len(self.menus)}", align=ALIGN_RIGHT)
+        menu.add.button(f"Filter Wheel            2 / {len(self.menus)}", align=ALIGN_RIGHT)
+        menu.add.vertical_margin(10)
 
         if not self.wheel:
             button = menu.add.button("No slots", align=ALIGN_LEFT)
             button.update_font({"color": (100, 100, 100)})
             return menu
+
+        filters = self.wheel_settings().filters
+
+        # TODO make the wheel always move to the default when entering or
+        # changing settings, then there is no need to implement this.
+        menu.add.label("Current: < Unknown >")
+
+        def select_default(a, i):
+            if not initialized or self.wheel_settings().default == i:
+                return
+            self.wheel_settings().default = i
+            self.rebuild_menus(skip_devices = True)
+        items = []
+        for i in range(len(filters)):
+            name = f"Slot {i + 1}"
+            if filters[i]:
+                name += f" ({filters[i]})"
+            items.append((name, i))
+        menu.add.selector(
+            title=f"Default: ",
+            items=items,
+            default=self.wheel_settings().default,
+            onchange=select_default,
+            align=ALIGN_LEFT)
+        menu.add.vertical_margin(10)
 
         # can't be defined inside the loop because python closures mess with
         # intuitive understanding of scope. This should also take the current
@@ -369,14 +398,11 @@ class Menu:
             name = a[0][0]
             if name == FILTER_OPTIONS[0]:
                 name = None
-            filters = self.wheel_settings().filters
             if filters[i] == name:
                 return
             print(f"updating slot {i} to {name}")
             filters[i] = name
             self.rebuild_menus(skip_devices = True)
-
-        filters = self.wheel_settings().filters
         for i in range(len(filters)):
             choice = filters[i] or FILTER_OPTIONS[0]
             options = [f for f in FILTER_OPTIONS if f == choice or f not in filters]
@@ -388,8 +414,7 @@ class Menu:
                 onchange=lambda a, i=i: select_slot(i, a),
                 align=ALIGN_LEFT)
 
-        # FIXME live / single / repeat filter default
-
+        menu.add.vertical_margin(10)
         def calibrate():
             print("called calibrate")
             self.wheel.calibrate()
@@ -402,6 +427,7 @@ class Menu:
         initialized = False
         menu = mk_menu()
         menu.add.button(f"Intervals              3 / {len(self.menus)}", align=ALIGN_RIGHT)
+        menu.add.vertical_margin(10)
 
         if not self.camera:
             button = menu.add.button("No camera", align=ALIGN_LEFT)
@@ -523,12 +549,22 @@ class Menu:
     def mk_capture(self):
         initialized = False
         menu = mk_menu()
-        menu.add.button(f"Capture              4 / {len(self.menus)}", align=ALIGN_RIGHT)
+        menu.add.button(f"Camera              4 / {len(self.menus)}", align=ALIGN_RIGHT)
+        menu.add.vertical_margin(10)
 
         if not self.camera:
             button = menu.add.button("No camera", align=ALIGN_LEFT)
             button.update_font({"color": (100, 100, 100)})
             return menu
+
+        # FIXME exposure
+        def update_exposure(a, e):
+            if not initialized or self.camera_settings().exposure == e:
+                return
+            self.camera_settings().exposure = e
+        menu.add.selector(
+            "Exposure (Single): ",
+        )
 
         if not self.camera.is_cooled:
             button = menu.add.button("No cooling", align=ALIGN_LEFT)
@@ -575,8 +611,6 @@ class Menu:
                 default=options.index(gain),
                 onchange=update_gain,
                 align=ALIGN_LEFT)
-
-        # FIXME single / repeat capture exposure
 
         initialized = True
         return menu
