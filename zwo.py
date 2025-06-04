@@ -383,12 +383,12 @@ class Camera:
         # the user swaps between ROI video and image capture modes.
         width, height, binning, img_type = c_int(), c_int(), c_int(), c_int()
         assert self.lib.ASIGetROIFormat(self.i, byref(width), byref(height), byref(binning), byref(img_type)) == 0
-        target_fmt = ASI_IMG_TYPE.ASI_IMG_RAW16
+        self.target_fmt = ASI_IMG_TYPE.ASI_IMG_RAW16
         if ASI_IMG_TYPE.ASI_IMG_RAW16 not in self.info.supported_formats():
-            target_fmt = ASI_IMG_TYPE.ASI_IMG_RAW8
-        if width.value != self.info.MaxWidth or height.value != self.info.MaxHeight or binning.value != 1 or img_type.value != target_fmt:
-            print(f"resetting the RoI and bit depth ({target_fmt}), was ({width.value}, {height.value}, {binning.value}, {img_type.value})")
-            call(self.lib.ASISetROIFormat(self.i, self.info.MaxWidth, self.info.MaxHeight, 1, target_fmt))
+            self.target_fmt = ASI_IMG_TYPE.ASI_IMG_RAW8
+        if width.value != self.info.MaxWidth or height.value != self.info.MaxHeight or binning.value != 1 or img_type.value != self.target_fmt:
+            print(f"resetting the RoI and bit depth ({self.target_fmt}), was ({width.value}, {height.value}, {binning.value}, {img_type.value})")
+            call(self.lib.ASISetROIFormat(self.i, self.info.MaxWidth, self.info.MaxHeight, 1, self.target_fmt))
 
         startx, starty = c_int(), c_int()
         call(self.lib.ASIGetStartPos(self.i, byref(startx), byref(starty)))
@@ -404,19 +404,37 @@ class Camera:
     def capture_wait(self):
         status = c_int()
         call(self.lib.ASIGetExpStatus(self.i, byref(status)))
-        return status.value
 
-    # could allow reusing buffers...
+        if status.value == ASI_EXPOSURE_STATUS.ASI_EXP_WORKING:
+            return False
+        if status.value == ASI_EXPOSURE_STATUS.ASI_EXP_SUCCESS:
+            return True
+
+        print(f"capture error {status.value}")
+        return None
+
+    def capture_stop(self):
+        call(self.lib.ASIStopExposure(self.i))
+
+    # could reuse buffers...
     def capture_finish(self):
         width = self.info.MaxWidth
         height = self.info.MaxHeight
-        buf_len = width * height * 2 # RAW16
+
+        if self.target_fmt == ASI_IMG_TYPE.ASI_IMG_RAW16:
+            buf_len = width * height * 2
+        elif self.target_fmt == ASI_IMG_TYPE.ASI_IMG_RAW8:
+            buf_len = width * height
+
         buf = (c_ubyte * buf_len)()
         call(self.lib.ASIGetDataAfterExp(self.i, buf, buf_len))
         call(self.lib.ASIStopExposure(self.i))
 
         img_array = np.ctypeslib.as_array(buf)
-        return img_array.view(np.uint16).reshape(height, width)
+        if self.target_fmt == ASI_IMG_TYPE.ASI_IMG_RAW16:
+            return img_array.view(np.uint16).reshape(height, width)
+        elif self.target_fmt == ASI_IMG_TYPE.ASI_IMG_RAW8:
+            return img_array.view(np.uint8).reshape(height, width)
 
     # we know the offset for highest dynamic range (~lowest gain) and lowest
     # read noise (~highest gain), and the offset for unity gain. That gives us
@@ -590,7 +608,7 @@ if __name__ == '__main__':
     while True:
         status = camera.capture_wait()
         print(f"status = {status}")
-        if status == ASI_EXPOSURE_STATUS.ASI_EXP_WORKING:
+        if status == False:
             time.sleep(0.1)
             continue
         else:

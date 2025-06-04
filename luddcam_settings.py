@@ -18,7 +18,6 @@ import pygame
 #    must be made in advance.
 # 5. range_slider doesn't support gamepads
 # 6. after a clear / rebuild a menu still renders the old version
-#    until there's an event on it.
 
 import pygame_menu
 import pygame_menu.controls as ctrl
@@ -112,10 +111,13 @@ class Menu:
         if not self.menus:
             self.menus = [mk_menu() for i in range(4)]
         if not skip_devices:
-            rebuild_menu(self.menus[0], self.mk_devices)
-        rebuild_menu(self.menus[1], self.mk_filters)
-        rebuild_menu(self.menus[2], self.mk_intervals)
-        rebuild_menu(self.menus[3], self.mk_camera)
+            self.menus[0] = rebuild_menu(self.menus[0], self.mk_devices)
+        self.menus[1] = rebuild_menu(self.menus[1], self.mk_filters)
+        self.menus[2] = rebuild_menu(self.menus[2], self.mk_intervals)
+        self.menus[3] = rebuild_menu(self.menus[3], self.mk_capture)
+
+    def rebuild_intervals(self):
+        self.menus[2] = rebuild_menu(self.menus[2], self.mk_intervals)
 
     def update(self, events):
         # left/right navigation should only work from the titles
@@ -146,9 +148,9 @@ class Menu:
         run(f"sudo /sbin/mkfs.{fs} {mnt}")
         run(f"udevil mount {mnt}")
 
-    def mk_devices(self, menu):
+    def mk_devices(self):
         initialized = False
-        menu.clear()
+        menu = mk_menu()
         menu.add.button(f"Devices              1 / {len(self.menus)}", align=ALIGN_RIGHT)
 
         # the general approach here is: if you don't want to use something then
@@ -345,16 +347,17 @@ class Menu:
             self.rebuild_menus()
         menu.add.button("Refresh", action=select_refresh, align=ALIGN_LEFT)
         initialized = True
+        return menu
 
-    def mk_filters(self, menu):
+    def mk_filters(self):
         initialized = False
-        menu.clear()
+        menu = mk_menu()
         menu.add.button(f"Filter Wheels           2 / {len(self.menus)}", align=ALIGN_RIGHT)
 
         if not self.wheel:
             button = menu.add.button("No slots", align=ALIGN_LEFT)
             button.update_font({"color": (100, 100, 100)})
-            return
+            return menu
 
         # can't be defined inside the loop because python closures mess with
         # intuitive understanding of scope. This should also take the current
@@ -384,29 +387,32 @@ class Menu:
                 onchange=lambda a, i=i: select_slot(i, a),
                 align=ALIGN_LEFT)
 
+        # FIXME live / single / repeat filter default
+
         def calibrate():
             print("called calibrate")
             self.wheel.calibrate()
         menu.add.button("Calibrate", action=calibrate, align=ALIGN_LEFT)
 
         initialized = True
+        return menu
 
-    def mk_intervals(self, menu):
+    def mk_intervals(self):
         initialized = False
-        menu.clear()
+        menu = mk_menu()
         menu.add.button(f"Intervals              3 / {len(self.menus)}", align=ALIGN_RIGHT)
 
         if not self.camera:
             button = menu.add.button("No camera", align=ALIGN_LEFT)
             button.update_font({"color": (100, 100, 100)})
-            return
+            return menu
 
         # TODO load (some are stock templates)
         # TODO save (we can have 2 numbered slots, per hardware combo)
 
         def clear():
             self.camera_settings().intervals = []
-            rebuild_menu(menu, self.mk_intervals)
+            rebuild_intervals()
 
         intervals = self.camera_settings().intervals
         if not intervals:
@@ -480,8 +486,7 @@ class Menu:
                 return
             intervals.append(new_entry)
             print(f"adding the new entry {new_entry}")
-            # only impacts this menu
-            rebuild_menu(menu, self.mk_intervals, count_from_end = True)
+            self.rebuild_intervals()
 
         menu_add = mk_menu("Add interval")
         menu_add.add.selector(
@@ -512,66 +517,68 @@ class Menu:
         # TODO repeat tickbox
 
         initialized = True
+        return menu
 
-    def mk_camera(self, menu):
+    def mk_capture(self):
         initialized = False
-        menu.clear()
-        menu.add.button(f"Camera              4 / {len(self.menus)}", align=ALIGN_RIGHT)
+        menu = mk_menu()
+        menu.add.button(f"Capture              4 / {len(self.menus)}", align=ALIGN_RIGHT)
 
         if not self.camera:
             button = menu.add.button("No camera", align=ALIGN_LEFT)
             button.update_font({"color": (100, 100, 100)})
+            return menu
+
+        if not self.camera.is_cooled:
+            button = menu.add.button("No cooling", align=ALIGN_LEFT)
+            button.update_font({"color": (100, 100, 100)})
         else:
-            if not self.camera.is_cooled:
-                button = menu.add.button("No cooling", align=ALIGN_LEFT)
-                button.update_font({"color": (100, 100, 100)})
-            else:
-                def update_cooling(a, cooling):
-                    if not initialized or cooling == self.camera_settings().cooling:
-                        return
-                    self.camera_settings().cooling = cooling
-                    self.camera.set_cooling(cooling)
-                # range_slider doesn't work with a gamepad...
-                # https://github.com/ppizarror/pygame-menu/issues/478
-                cooling = self.camera_settings().cooling
-                options = list(range(-20, 20 + 1, 5))
-                menu.add.selector(
-                    "Target Temp: ",
-                    items=[(f"{i}°C", i) for i in options],
-                    default=options.index(cooling),
-                    onchange=update_cooling,
-                    align=ALIGN_LEFT)
+            def update_cooling(a, cooling):
+                if not initialized or cooling == self.camera_settings().cooling:
+                    return
+                self.camera_settings().cooling = cooling
+                self.camera.set_cooling(cooling)
+            # range_slider doesn't work with a gamepad...
+            # https://github.com/ppizarror/pygame-menu/issues/478
+            cooling = self.camera_settings().cooling
+            options = list(range(-20, 20 + 1, 5))
+            menu.add.selector(
+                "Target Temp: ",
+                items=[(f"{i}°C", i) for i in options],
+                default=options.index(cooling),
+                onchange=update_cooling,
+                align=ALIGN_LEFT)
 
-            # TODO binning
-            # TODO anti-dew heater
+        # TODO binning
+        # TODO anti-dew heater
 
-            if self.camera.has_gain:
-                def update_gain(a, gain):
-                    if not initialized or gain == self.camera_settings().gain:
-                        return
-                    self.camera_settings().gain = gain
-                    self.camera.set_gain(gain)
-                    print(f"changed camera gain to {gain}")
-                gain = self.camera_settings().gain
-                start = self.camera.gain_min
-                end = self.camera.gain_max
-                step = round((end - start) / 10)
-                options = list(range(start, end + 1, step))
-                if self.camera.gain_unity:
-                    options.append(self.camera.gain_unity)
-                options.append(self.camera.gain_default)
-                options = sorted(set(options))
-                menu.add.selector(
-                    "Gain: ",
-                    items=[(f"{i}", i) for i in options],
-                    default=options.index(gain),
-                    onchange=update_gain,
-                    align=ALIGN_LEFT)
+        if self.camera.has_gain:
+            def update_gain(a, gain):
+                if not initialized or gain == self.camera_settings().gain:
+                    return
+                self.camera_settings().gain = gain
+                self.camera.set_gain(gain)
+                print(f"changed camera gain to {gain}")
+            gain = self.camera_settings().gain
+            start = self.camera.gain_min
+            end = self.camera.gain_max
+            step = round((end - start) / 10)
+            options = list(range(start, end + 1, step))
+            if self.camera.gain_unity:
+                options.append(self.camera.gain_unity)
+            options.append(self.camera.gain_default)
+            options = sorted(set(options))
+            menu.add.selector(
+                "Gain: ",
+                items=[(f"{i}", i) for i in options],
+                default=options.index(gain),
+                onchange=update_gain,
+                align=ALIGN_LEFT)
 
+        # FIXME single / repeat capture exposure
 
         initialized = True
-
-# TODO live exposure
+        return menu
 
 # TODO guiding settings
 # gain
@@ -600,13 +607,17 @@ def run(cmd):
 def tuples(strings):
     return [(s,) for s in strings]
 
+# takes the old menu, and a fn that creates a new one, preserving the old
+# selection index. It is not enough to .clear() the old menu, we must rebuild it
+# because pygame_menu will render the stale data and there's no (obvious) way to
+# force a re-render.
 def rebuild_menu(menu, fn, count_from_end = False):
     selected_idx = 0
     if menu.get_selected_widget():
         selected_idx = menu.get_widgets().index(menu.get_selected_widget())
     if count_from_end:
         selected_idx = len(menu.get_widgets()) - selected_idx
-    fn(menu)
+    menu = fn()
     if selected_idx > 0:
         print(f"recovering saved position at widget {selected_idx}")
         for widget in menu.get_widgets():
@@ -616,6 +627,7 @@ def rebuild_menu(menu, fn, count_from_end = False):
             if idx == selected_idx:
                 menu.select_widget(widget)
                 break
+    return menu
 
 def mk_menu(title = "Settings"):
     surface = pygame.display.get_surface()
