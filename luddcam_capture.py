@@ -164,22 +164,29 @@ class Capture:
         print(f"capture stopped for {self.camera.name}")
 
     def viewable_array(self, img_array):
+        # in order to be able to use blit_array the dims must match the target
+        # dims exactly.
         height, width = img_array.shape
 
         scale_w = width / self.target_width
         scale_h = height / self.target_height
-        scale = max(scale_w, scale_h)
+        scale = min(scale_w, scale_h)
 
-        new_w = int(width / scale)
-        new_h = int(height / scale)
-
-        img_ds = img_array[::int(scale), ::int(scale)]
-        img_ds = img_ds[:new_h, :new_w]
+        step = max(1, int(scale))
+        img_ds = img_array[::step, ::step]
 
         img_8bit = (img_ds >> 8).astype(np.uint8)
         img_rgb = np.stack([img_8bit]*3, axis=-1)
+        img_rgb_t = np.transpose(img_rgb, (1, 0, 2))
 
-        return np.transpose(img_rgb, (1, 0, 2))
+        # faster top-left crop
+        # return img_rgb_t[:self.target_width, :self.target_height, :]
+
+        # central crop
+        w, h = img_rgb_t.shape[:2]
+        start_x = (w - self.target_width) // 2
+        start_y = (h - self.target_height) // 2
+        return img_rgb_t[start_x:start_x + self.target_width, start_y:start_y + self.target_height, :]
 
 class Menu:
     def __init__(self):

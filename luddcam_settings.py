@@ -18,6 +18,7 @@ import pygame
 #    must be made in advance.
 # 5. range_slider doesn't support gamepads
 # 6. after a clear / rebuild a menu still renders the old version
+# 7. selectors must take tuples, not even a list of strings.
 
 import pygame_menu
 import pygame_menu.controls as ctrl
