@@ -1,3 +1,4 @@
+from fractions import Fraction
 import json
 import os
 import pathlib
@@ -31,8 +32,22 @@ ALIGN_RIGHT=pygame_menu.locals.ALIGN_RIGHT
 # lets users optionally name their filter slots
 FILTER_OPTIONS = ["undefined", "L", "R", "G", "B", "Sii", "Ha", "Oiii", "Ha Oiii", "Ha Oiii Hb", "Sii Oiii", "Dark" ]
 
-# sensible DSO exposure times (might want to add planetary / flat / bias)
-EXPOSURE_OPTIONS = [1, 2, 5, 10, 30, 60, 120, 180, 240, 300, 600, 900, 1200]
+# Exposure times, in seconds.
+#
+# The shortest and longest exposure times for the camera may be used to limit
+# this list, and the shortest time may be added (useful for bias frames).
+#
+# When displaying on the screen we try to use
+# Fraction(...).limit_denominator(10000)
+EXPOSURE_OPTIONS = sorted(set(
+    # standard DSLR shutter
+    [1/8000, 1/4000, 1/2000, 1/1000, 1/500, 1/250, 1/125, 1/60, 1/30, 1/15, 1/12, 1/10, 1/8, 1/4, 1/2, 1, 2, 4, 8, 15, 30] +
+    # sensible DSO values
+    [60, 120, 180, 240, 300, 600, 900, 1200]))
+
+# for i in EXPOSURE_OPTIONS:
+#     f = Fraction(i).limit_denominator(10000)
+#     print(f"{i} = {f}")
 
 # sensible count of subs
 FRAME_OPTIONS = [4, 6, 10, 12, 20, 25, 30, 50, 60, 100, 120, 1000]
@@ -101,6 +116,16 @@ class Menu:
         if self.settings.wheel:
             return self.settings.wheels[self.settings.wheel]
 
+    def exposure_options(self):
+        exp_min = self.camera.exposure_min
+        exp_max = self.camera.exposure_max
+
+        options = EXPOSURE_OPTIONS
+        if exp_min not in options:
+            options = [exp_min] + EXPOSURE_OPTIONS
+
+        return [i for i in options if i >= exp_min and i <= exp_max]
+
     # needs to be called any time settings are changed.
     # the option to skip rebuilding the devices menu allows
     # only quick cosmetic changes to be made in other menus.
@@ -114,11 +139,14 @@ class Menu:
         if not skip_devices:
             self.menus[0] = rebuild_menu(self.menus[0], self.mk_devices)
         self.menus[1] = rebuild_menu(self.menus[1], self.mk_filters)
-        self.menus[2] = rebuild_menu(self.menus[2], self.mk_intervals)
-        self.menus[3] = rebuild_menu(self.menus[3], self.mk_capture)
+        self.menus[2] = rebuild_menu(self.menus[2], self.mk_capture)
+        self.menus[3] = rebuild_menu(self.menus[3], self.mk_intervals)
 
+
+    # used internally to rebuild the intervals after adding an entry, kept here
+    # as a visual reminder if the indexes are ever updated.
     def rebuild_intervals(self):
-        self.menus[2] = rebuild_menu(self.menus[2], self.mk_intervals)
+        self.menus[3] = rebuild_menu(self.menus[3], self.mk_intervals, count_from_end = True)
 
     def update(self, events):
         # left/right navigation should only work from the titles
@@ -180,6 +208,8 @@ class Menu:
             if c.name == "none":
                 return
             prefs = self.camera_settings()
+            if not prefs.exposure:
+                prefs.exposure = 1
             if c.is_cooled and prefs.cooling == {}:
                 prefs.cooling = 0
             if c.has_gain and prefs.gain == {}:
@@ -213,6 +243,7 @@ class Menu:
             # preferences to take into account.
             if len(prefs := self.settings.cameras.get(c.name)) > 0:
                 print(f"considering preferences for guide camera {prefs}")
+                # we don't set the exposure, that is handled internally
                 if c.is_cooled and prefs.cooling != {}:
                     self.guide.set_cooling(prefs.cooling)
                 if c.has_gain and prefs.gain != {}:
@@ -291,6 +322,7 @@ class Menu:
                 prefs.filters = [None] * self.wheel.slots
             if prefs.default == {}:
                 prefs.default = 0
+            self.wheel.set_slot(prefs.default)
         if not self.wheels:
             button = menu.add.button("Filter Wheel: none", align=ALIGN_LEFT)
             button.update_font({"color": (100, 100, 100)})
@@ -332,7 +364,7 @@ class Menu:
                     return
                 set_drive(drive)
             default = find_index(drives, lambda c: c == self.settings.drive, 0)
-            print(f"DEBUG DEFAULT DRIVE = {default} in {drives}")
+            # print(f"DEBUG DEFAULT DRIVE = {default} in {drives}")
             set_drive(drives[default])
             menu.add.selector(
                 title="Drive: ",
@@ -366,14 +398,11 @@ class Menu:
 
         filters = self.wheel_settings().filters
 
-        # TODO make the wheel always move to the default when entering or
-        # changing settings, then there is no need to implement this.
-        menu.add.label("Current: < Unknown >")
-
         def select_default(a, i):
             if not initialized or self.wheel_settings().default == i:
                 return
             self.wheel_settings().default = i
+            self.wheel.set_slot(i)
             self.rebuild_menus(skip_devices = True)
         items = []
         for i in range(len(filters)):
@@ -382,7 +411,7 @@ class Menu:
                 name += f" ({filters[i]})"
             items.append((name, i))
         menu.add.selector(
-            title=f"Default: ",
+            title=f"Filter: ",
             items=items,
             default=self.wheel_settings().default,
             onchange=select_default,
@@ -426,7 +455,7 @@ class Menu:
     def mk_intervals(self):
         initialized = False
         menu = mk_menu()
-        menu.add.button(f"Intervals              3 / {len(self.menus)}", align=ALIGN_RIGHT)
+        menu.add.button(f"Intervals              4 / {len(self.menus)}", align=ALIGN_RIGHT)
         menu.add.vertical_margin(10)
 
         if not self.camera:
@@ -452,7 +481,7 @@ class Menu:
         # so we have to create a menu for every possible action.
 
         if intervals:
-            menu.add.label("-" * 32, font_size=10, align=ALIGN_LEFT)
+            menu.add.label("-" * 32, font_size=16, align=ALIGN_LEFT)
 
         def filter_name(i):
             return self.wheel_settings().filters[i] or f"Slot {i + 1}"
@@ -470,7 +499,7 @@ class Menu:
             menu.add.button(f"{e.frames} x {e.exposure} secs{suf}{summary}", align=ALIGN_LEFT)
 
         if intervals:
-            menu.add.label("-" * 32, font_size=10, align=ALIGN_LEFT)
+            menu.add.label(("-" * 12) + " repeat " + ("-" * 12), font_size=16, align=ALIGN_LEFT)
 
         # TODO infer defaults for new entries from the existing ones
         new_entry = Box()
@@ -486,7 +515,8 @@ class Menu:
                 # the intervalometer setup may need to be adjusted.
                 filter_choices.append((filter_name(i), i))
 
-        default_exposure = EXPOSURE_OPTIONS.index(new_entry.exposure)
+        exposure_options = self.exposure_options()
+        default_exposure = exposure_options.index(new_entry.exposure)
         default_frames = FRAME_OPTIONS.index(new_entry.frames)
         default_filter = 0
 
@@ -524,7 +554,7 @@ class Menu:
             align=ALIGN_LEFT)
         menu_add.add.selector(
             "Exposure (seconds): ",
-            items=[(str(i), i) for i in EXPOSURE_OPTIONS],
+            items=[(str(Fraction(i).limit_denominator(10000)), i) for i in exposure_options],
             default=default_exposure,
             onchange=select_exposure,
             align=ALIGN_LEFT)
@@ -541,15 +571,13 @@ class Menu:
         menu_add.add.button('Cancel', pygame_menu.events.BACK, align=ALIGN_LEFT)
         menu.add.button("Add", action=menu_add, align=ALIGN_LEFT)
 
-        # TODO repeat tickbox
-
         initialized = True
         return menu
 
     def mk_capture(self):
         initialized = False
         menu = mk_menu()
-        menu.add.button(f"Camera              4 / {len(self.menus)}", align=ALIGN_RIGHT)
+        menu.add.button(f"Camera              3 / {len(self.menus)}", align=ALIGN_RIGHT)
         menu.add.vertical_margin(10)
 
         if not self.camera:
@@ -557,14 +585,20 @@ class Menu:
             button.update_font({"color": (100, 100, 100)})
             return menu
 
-        # FIXME exposure
         def update_exposure(a, e):
             if not initialized or self.camera_settings().exposure == e:
                 return
             self.camera_settings().exposure = e
+        exposure_options = self.exposure_options()
+        items = [(str(Fraction(i).limit_denominator(10000)), i) for i in exposure_options]
+        exposure = self.camera_settings().exposure
+        default = exposure_options.index(exposure) if exposure in exposure_options else exposure_options.index(1)
         menu.add.selector(
             "Exposure (Single): ",
-        )
+            items=items,
+            default=default,
+            onchange=update_exposure,
+            align=ALIGN_LEFT)
 
         if not self.camera.is_cooled:
             button = menu.add.button("No cooling", align=ALIGN_LEFT)

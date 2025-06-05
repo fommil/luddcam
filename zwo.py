@@ -335,6 +335,11 @@ class Camera:
                 self.offset_min = caps.MinValue
                 self.offset_max = caps.MaxValue
 
+        # we assume that we can control exposure time
+        exp = self.controls[ASI_CONTROL_TYPE.ASI_EXPOSURE]
+        self.exposure_min = exp.MinValue / 1000000
+        self.exposure_max = exp.MaxValue / 1000000
+
         if (self.info.IsTriggerCam == ASI_BOOL.ASI_TRUE):
             call(self.lib.ASISetCameraMode(self.i, ASI_CAMERA_MODE.ASI_MODE_NORMAL))
         call(self.lib.ASIInitCamera(self.i))
@@ -472,6 +477,19 @@ class EFW_INFO(Structure):
             return "ZWO EFWmini"
         return f"ZWO {self.name()} ({self.slotNum} slots)"
 
+class EFW_ERROR_CODE(IntEnum):
+    EFW_SUCCESS = 0
+    EFW_ERROR_INVALID_INDEX = 1
+    EFW_ERROR_INVALID_ID = 2
+    EFW_ERROR_INVALID_VALUE = 3
+    EFW_ERROR_REMOVED = 4
+    EFW_ERROR_MOVING = 5
+    EFW_ERROR_ERROR_STATE = 6
+    EFW_ERROR_GENERAL_ERROR = 7
+    EFW_ERROR_NOT_SUPPORTED = 8
+    EFW_ERROR_CLOSED = 9
+    EFW_ERROR_END = -1
+
 class EfwFilter:
     def __init__(self):
         arch = get_normalized_arch()
@@ -487,17 +505,14 @@ class EfwFilter:
         self.lib.EFWOpen.restype = c_int  # EFW_ERROR_CODE
         self.lib.EFWOpen.argtypes = [c_int]
 
-        # self.lib.EFWGetPosition.restype = c_int  # EFW_ERROR_CODE
-        # self.lib.EFWGetPosition.argtypes = [c_int, POINTER(c_int)]
+        self.lib.EFWGetPosition.restype = c_int  # EFW_ERROR_CODE
+        self.lib.EFWGetPosition.argtypes = [c_int, POINTER(c_int)]
 
-        # self.lib.EFWSetPosition.restype = c_int  # EFW_ERROR_CODE
-        # self.lib.EFWSetPosition.argtypes = [c_int, c_int]
+        self.lib.EFWSetPosition.restype = c_int  # EFW_ERROR_CODE
+        self.lib.EFWSetPosition.argtypes = [c_int, c_int]
 
-        # self.lib.EFWSetDirection.restype = c_int  # EFW_ERROR_CODE
-        # self.lib.EFWSetDirection.argtypes = [c_int, c_bool]
-
-        # self.lib.EFWGetDirection.restype = c_int  # EFW_ERROR_CODE
-        # self.lib.EFWGetDirection.argtypes = [c_int, POINTER(c_bool)]
+        self.lib.EFWSetDirection.restype = c_int  # EFW_ERROR_CODE
+        self.lib.EFWSetDirection.argtypes = [c_int, c_bool]
 
         # self.lib.EFWClose.restype = c_int  # EFW_ERROR_CODE
         # self.lib.EFWClose.argtypes = [c_int]
@@ -533,9 +548,26 @@ class Wheel:
         call(self.lib.EFWGetProperty(self.i, byref(self.info)))
         self.name = self.info.identifier()
         self.slots = self.info.slotNum
+        # sets bi-directional movement
+        call(self.lib.EFWSetPosition(self.i, ASI_BOOL.ASI_FALSE))
 
     def calibrate(self):
         call(self.lib.EFWCalibrate(self.i))
+
+    # -1 when in motion
+    def get_slot(self):
+        pos = c_int()
+        call(self.lib.EFWGetPosition(self.i, byref(pos)))
+        return pos.value
+
+    # blocks if the wheel is in motion
+    def set_slot(self, s):
+        result = self.lib.EFWSetPosition(self.i, s)
+        while result == EFW_ERROR_CODE.EFW_ERROR_MOVING:
+            print("EFW waiting for wheel to stop moving")
+            time.sleep(0.1)
+            result = self.lib.EFWSetPosition(self.i, s)
+        call(result)
 
 def get_normalized_arch():
     raw = platform.machine().lower()
