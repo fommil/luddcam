@@ -147,6 +147,7 @@ class Capture:
 
         exposure = self.camera_settings.exposure
         slot = None
+        writer = None
 
         while not self._stop.is_set():
             time.sleep(0.1)
@@ -175,45 +176,43 @@ class Capture:
                 print("capture complete")
                 data = self.camera.capture_finish()
 
+                if writer:
+                    writer.stale()
+
                 # TODO skip if LIVE
                 if self.output_dir:
                     out = f"{self.output_dir}/IMG_{self.seq:05}.fits"
                     print(f"...saving to {out}")
                     self.seq += 1
-                    # TODO save in an external Thread (this is typically taking
-                    # 0.2 seconds, which is relevant for calibration frames)
-                    start = time.perf_counter()
-                    with fitsio.FITS(out, 'rw') as fits:
-                        fits.write(data, compress="rice")
-                        hdu = fits[-1]
-                        if data.dtype == "uint16":
-                            hdu.write_key("BZERO", 32768)
-                        elif data.dtype == "uint8":
-                            hdu.write_key("BZERO", 128)
-                        hdu.write_key("BSCALE", 1)
-                        hdu.write_key("PROGRAM", "luddcam")
-                        hdu.write_key("DATE", datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S'))
-                        hdu.write_key("EXPTIME", exposure)
-                        if slot != None:
-                            name = self.wheel_settings.filters[slot] or f"Slot {slot + 1}"
-                            hdu.write_key("FILTER", name)
-                        hdu.write_key("XPIXSZ", self.camera.pixelsize)
-                        hdu.write_key("YPIXSZ", self.camera.pixelsize)
-                        hdu.write_key("INSTRUME", self.camera.name)
-                        if (temp := self.camera.get_temp()) != None:
-                            hdu.write_key("CCD-TEMP", temp)
-                        if self.camera.is_cooled:
-                            hdu.write_key("SET-TEMP", self.camera_settings.cooling)
-                        if self.camera.gain != None:
-                            hdu.write_key("GAIN", self.camera.gain)
-                        if self.camera.offset != None:
-                            hdu.write_key("OFFSET", self.camera.gain)
-                        if self.camera.bayer:
-                            hdu.write_key("BAYERPAT", self.camera.bayer)
-                        # then any wcs data if we plate solved...
-                    end = time.perf_counter()
-                    elapsed = end - start
-                    print(f"FITS writing elapsed time: {elapsed:.4f} seconds")
+
+                    metadata = []
+                    if data.dtype == "uint16":
+                        metadata.append(("BZERO", 32768))
+                    elif data.dtype == "uint8":
+                        metadata.append(("BZERO", 128))
+                    metadata.append(("BSCALE", 1))
+                    metadata.append(("PROGRAM", "luddcam"))
+                    metadata.append(("DATE", datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S')))
+                    metadata.append(("EXPTIME", exposure))
+                    if slot != None:
+                        name = self.wheel_settings.filters[slot] or f"Slot {slot + 1}"
+                        metadata.append(("FILTER", name))
+                    metadata.append(("XPIXSZ", self.camera.pixelsize))
+                    metadata.append(("YPIXSZ", self.camera.pixelsize))
+                    metadata.append(("INSTRUME", self.camera.name))
+                    if (temp := self.camera.get_temp()) != None:
+                        metadata.append(("CCD-TEMP", temp))
+                    if self.camera.is_cooled:
+                        metadata.append(("SET-TEMP", self.camera_settings.cooling))
+                    if self.camera.gain != None:
+                        metadata.append(("GAIN", self.camera.gain))
+                    if self.camera.offset != None:
+                        metadata.append(("OFFSET", self.camera.gain))
+                    if self.camera.bayer:
+                        metadata.append(("BAYERPAT", self.camera.bayer))
+
+                    writer = FitsWriter(data, out, self.surface, metadata)
+                    writer.start()
 
                 img_rgb = self.viewable_array(data)
                 with self.lock:
@@ -249,6 +248,46 @@ class Capture:
         start_x = (w - self.target_width) // 2
         start_y = (h - self.target_height) // 2
         return img_rgb_t[start_x:start_x + self.target_width, start_y:start_y + self.target_height, :]
+
+# we write the data to the file, and then update the surface with a little icon
+# to denote that the save succeeded or failed. It is possible, for relatively
+# fast exposures that the surface has already moved on and in those cases we
+# should not update.
+#
+# A live writer should stop the python process from exiting, because the file
+# must be written.
+class FitsWriter:
+    def __init__(self, data, out, surface, metadata):
+        self.data = data
+        self.out = out
+        self.surface = surface
+        self.metadata = metadata
+        self.thread = threading.Thread(target=self.run, daemon=False, name=f"FitsWriter {out}")
+
+    def start(self):
+        self.thread.start()
+
+    # marks the data as being stale. It must still be written to disk but icon
+    # drawing should be skipped. This is probably going to be rethought with a
+    # class holding the surface, and a filename based lock for doing all the
+    # icon updates.
+    def stale(self):
+        pass
+
+    def run(self):
+        start = time.perf_counter()
+        with fitsio.FITS(self.out, 'rw') as fits:
+            fits.write(self.data, compress="rice")
+            hdu = fits[-1]
+            for k, v in self.metadata:
+                hdu.write_key(k, v)
+        end = time.perf_counter()
+        elapsed = end - start
+        print(f"FITS writing elapsed time: {elapsed:.4f} seconds")
+        # TODO can we sync/flush to make sure it is written to silicon?
+
+        # TODO if the write succeeded, and the surface is ok to write to then do
+        # so. This is kinda fiddly and needs some thought.
 
 class Menu:
     def __init__(self):
