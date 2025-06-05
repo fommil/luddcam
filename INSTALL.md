@@ -13,9 +13,13 @@ This is only tested on a Linux Linux desktop and Raspberry pi but it should work
 If you're on a desktop like Debian you may need to enable `non-free` or `contrib` to get access to ZWO libs, but these should be available on a standard raspberry pi by default:
 
 ```
-sudo apt install libasi python3-pygame python3-box devmon udevil exfat-fuse fonts-hack
+sudo apt install libasi python3-pygame python3-box python3-fitsio udevil exfatprogs fonts-hack
+```
 
-# workaround bug in raspberry pi devmon/exfat support
+On a raspberry pi we need to add legacy support for exfat (not necessary on the desktop)
+
+```
+sudo apt install exfat-fuse
 sudo ln -s mount.exfat-fuse /usr/sbin/mount.exfat
 ```
 

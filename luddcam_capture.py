@@ -51,11 +51,19 @@
 #
 # A design choice is that the settings are only accessible through the SELECT
 # menu, we're not providing sub-menus. This keeps everything nice and simple.
+#
+# Discussion here about Siril header requirements:
+# https://discuss.pixls.us/t/formats-and-headers-supported-required-by-siril/50531
 
+from datetime import datetime, timezone
 import threading
 from enum import Enum
+import os
+from pathlib import Path
 import time
+import re
 
+import fitsio
 import numpy as np
 import pygame
 
@@ -66,10 +74,11 @@ class Mode(Enum):
     INTERVALS = 3
 
 class Capture:
-    def __init__(self, width, height, camera, camera_settings, wheel, wheel_settings, mode):
+    def __init__(self, width, height, output_dir, camera, camera_settings, wheel, wheel_settings, mode):
         self.lock = threading.Lock()
         self.target_width = width
         self.target_height = height
+        self.output_dir = output_dir
         self.camera = camera
         self.camera_settings = camera_settings
         self.wheel = wheel
@@ -85,6 +94,15 @@ class Capture:
         self._stop = threading.Event()
 
         self.thread = threading.Thread(target=self.run, daemon=True, name="Capture")
+
+        if output_dir:
+            pattern = re.compile(r'IMG_(\d{5})\.fits$')
+            numbers = []
+            for path in Path(self.output_dir).iterdir():
+                match = pattern.match(path.name)
+                if match:
+                    numbers.append(int(match.group(1)))
+            self.seq = max(numbers) + 1 if numbers else None
 
     def start(self):
         return self.thread.start()
@@ -126,6 +144,10 @@ class Capture:
 
     def run(self):
         self.capturing = False
+
+        exposure = self.camera_settings.exposure
+        slot = None
+
         while not self._stop.is_set():
             time.sleep(0.1)
             if self._pause.is_set():
@@ -135,9 +157,11 @@ class Capture:
                 continue
 
             if not self.capturing:
-                # FIXME move the filter wheel, wait for it to be in position
-                # FIXME use the user provided exposure
-                self.camera.capture_start(1)
+                # TODO interval playback, changes exposure and wheel
+                if self.wheel:
+                    slot = self.wheel_settings.default
+                    self.wheel.set_slot(slot)
+                self.camera.capture_start(exposure)
                 self.capturing = True
                 continue
 
@@ -149,11 +173,49 @@ class Capture:
             elif status == True:
                 self.capturing = False
                 print("capture complete")
-                img_raw = self.camera.capture_finish()
-                img_rgb = self.viewable_array(img_raw)
+                data = self.camera.capture_finish()
 
-                # FIXME save to disk
+                # TODO skip if LIVE
+                if self.output_dir:
+                    out = f"{self.output_dir}/IMG_{self.seq:05}.fits"
+                    print(f"...saving to {out}")
+                    self.seq += 1
+                    # TODO save in an external Thread (this is typically taking
+                    # 0.2 seconds, which is relevant for calibration frames)
+                    start = time.perf_counter()
+                    with fitsio.FITS(out, 'rw') as fits:
+                        fits.write(data, compress="rice")
+                        hdu = fits[-1]
+                        if data.dtype == "uint16":
+                            hdu.write_key("BZERO", 32768)
+                        elif data.dtype == "uint8":
+                            hdu.write_key("BZERO", 128)
+                        hdu.write_key("BSCALE", 1)
+                        hdu.write_key("PROGRAM", "luddcam")
+                        hdu.write_key("DATE", datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S'))
+                        hdu.write_key("EXPTIME", exposure)
+                        if slot != None:
+                            name = self.wheel_settings.filters[slot] or f"Slot {slot + 1}"
+                            hdu.write_key("FILTER", name)
+                        hdu.write_key("XPIXSZ", self.camera.pixelsize)
+                        hdu.write_key("YPIXSZ", self.camera.pixelsize)
+                        hdu.write_key("INSTRUME", self.camera.name)
+                        if (temp := self.camera.get_temp()) != None:
+                            hdu.write_key("CCD-TEMP", temp)
+                        if self.camera.is_cooled:
+                            hdu.write_key("SET-TEMP", self.camera_settings.cooling)
+                        if self.camera.gain != None:
+                            hdu.write_key("GAIN", self.camera.gain)
+                        if self.camera.offset != None:
+                            hdu.write_key("OFFSET", self.camera.gain)
+                        if self.camera.bayer:
+                            hdu.write_key("BAYERPAT", self.camera.bayer)
+                        # then any wcs data if we plate solved...
+                    end = time.perf_counter()
+                    elapsed = end - start
+                    print(f"FITS writing elapsed time: {elapsed:.4f} seconds")
 
+                img_rgb = self.viewable_array(data)
                 with self.lock:
                     pygame.surfarray.blit_array(self.surface, img_rgb)
             else:
@@ -193,7 +255,7 @@ class Menu:
         self.capture = None
         self.mode = Mode.LIVE
 
-    def update_settings(self, camera, camera_settings, wheel, wheel_settings):
+    def update_settings(self, output_dir, camera, camera_settings, wheel, wheel_settings):
         assert not self.capture
         if not camera:
             return
@@ -202,7 +264,7 @@ class Menu:
         w = surface.get_width()
         h = surface.get_height()
 
-        self.capture = Capture(w, h, camera, camera_settings, wheel, wheel_settings, self.mode)
+        self.capture = Capture(w, h, output_dir, camera, camera_settings, wheel, wheel_settings, self.mode)
         self.capture.start()
 
     def cancel(self):

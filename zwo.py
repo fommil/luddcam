@@ -280,6 +280,12 @@ class Camera:
         self.is_cooled = None
         self.has_gain = None
 
+        self.bayer = None
+
+        # updated to hold the last set value
+        self.gain = None
+        self.offset = None
+
         # NOTE there is a concept in indi known as "blinking" where multiple
         # very short exposures are made before changing any settings. I haven't
         # seen a need to do it.
@@ -287,6 +293,18 @@ class Camera:
         call(self.lib.ASIGetCameraProperty(byref(self.info), self.i))
         self.name = self.info.name()
         # print(f"{self.info}")
+
+        if self.info.IsColorCam == ASI_BOOL.ASI_TRUE:
+            if self.info.BayerPattern == ASI_BAYER_PATTERN.ASI_BAYER_RG:
+                self.bayer = "RGGB"
+            elif self.info.BayerPattern == ASI_BAYER_PATTERN.ASI_BAYER_BG:
+                self.bayer = "BGGR"
+            elif self.info.BayerPattern == ASI_BAYER_PATTERN.ASI_BAYER_GR:
+                self.bayer = "GRBG"
+            elif self.info.BayerPattern == ASI_BAYER_PATTERN.ASI_BAYER_GB:
+                self.bayer = "GBRG"
+
+        self.pixelsize = self.info.PixelSize
 
         self.guide = bool(self.info.ST4Port)
         if self.name == "ZWO ASI1600MM Pro":
@@ -348,7 +366,9 @@ class Camera:
         # call(self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_HIGH_SPEED_MODE, ASI_BOOL.ASI_FALSE, ASI_BOOL.ASI_FALSE))
         # call(self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_BANDWIDTHOVERLOAD, 40, ASI_BOOL.ASI_FALSE))
 
-    def temp(self):
+    def get_temp(self):
+        if ASI_CONTROL_TYPE.ASI_TEMPERATURE not in self.controls:
+            return None
         value = c_long()
         call(self.lib.ASIGetControlValue(self.i, ASI_CONTROL_TYPE.ASI_TEMPERATURE, byref(value), byref(c_int(ASI_BOOL.ASI_FALSE))))
         return value.value / 10.0
@@ -371,12 +391,14 @@ class Camera:
         v = int(gain)
         print(f"setting gain = {gain} for {self.name}")
         call(self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_GAIN, v, ASI_BOOL.ASI_FALSE))
+        self.gain = v
 
         # older cameras need this, but newer ones have it auto-set in firmware
         if ASI_CONTROL_TYPE.ASI_OFFSET in self.controls:
             v = int(self.infer_offset(gain))
             print(f"setting offset = {v} (for gain = {gain}) for {self.name}")
             call(self.lib.ASISetControlValue(self.i, ASI_CONTROL_TYPE.ASI_OFFSET, v, ASI_BOOL.ASI_FALSE))
+            self.offset = v
 
     def capture_start(self, exposure):
         print(f"capture_start for exposure={exposure}")

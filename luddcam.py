@@ -109,7 +109,12 @@ def main():
             elif mode == Mode.SETTINGS and is_menu(event):
                 print("exiting settings")
                 settings_menu.save()
-                capture_menu.update_settings(settings_menu.camera, settings_menu.camera_settings(), settings_menu.wheel, settings_menu.wheel_settings())
+                capture_menu.update_settings(
+                    settings_menu.output_dir(),
+                    settings_menu.camera,
+                    settings_menu.camera_settings(),
+                    settings_menu.wheel,
+                    settings_menu.wheel_settings())
                 pop()
             elif mode > Mode.SETTINGS and is_menu(event):
                 print("entering settings")

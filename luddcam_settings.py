@@ -116,6 +116,12 @@ class Menu:
         if self.settings.wheel:
             return self.settings.wheels[self.settings.wheel]
 
+    def output_dir(self):
+        if self.settings.drive:
+            path = get_drive(self.settings.drive)
+            if os.path.isdir(path) and os.access(path, os.W_OK):
+                return path
+
     def exposure_options(self):
         exp_min = self.camera.exposure_min
         exp_max = self.camera.exposure_max
@@ -769,13 +775,13 @@ def list_drives():
             if win32file.GetDriveType(f"{d}:\\") == win32file.DRIVE_REMOVABLE
         ]
     else:
-        os.listdir(MEDIA_BASE)
+        return os.listdir(MEDIA_BASE)
 
 def get_drive(relative):
     if sys.platform == "win32":
         return relative
     else:
-        return f"{MEDIA_BASE}"
+        return f"{MEDIA_BASE}{relative}"
 
 class NoCamera:
     def __init__(self):
