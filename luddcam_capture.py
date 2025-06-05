@@ -283,8 +283,10 @@ class FitsWriter:
                 hdu.write_key(k, v)
         end = time.perf_counter()
         elapsed = end - start
+        # we're using removable media, let's flush our writes
+        with open(self.out, 'rb+') as f:
+            os.fsync(f.fileno())
         print(f"FITS writing elapsed time: {elapsed:.4f} seconds")
-        # TODO can we sync/flush to make sure it is written to silicon?
 
         # TODO if the write succeeded, and the surface is ok to write to then do
         # so. This is kinda fiddly and needs some thought.
