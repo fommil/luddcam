@@ -119,6 +119,13 @@ def main():
             elif mode > Mode.SETTINGS and is_menu(event):
                 print("entering settings")
                 # TODO warning / ack about ending capture sessions
+                #
+                # It would be nice if it only paused interval playback instead
+                # of resetting. If the intervals don't change (but anything else
+                # can), it would be good to pick up from our previous point.
+                #
+                # Likewise, guiding state should probably be preserved too,
+                # unless the guide camera is changed.
                 capture_menu.cancel()
                 push(Mode.SETTINGS)
 

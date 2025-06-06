@@ -7,6 +7,8 @@ import sys
 import traceback
 import warnings
 
+# TODO remove Box, it is more trouble than its worth
+#      and an awkward extra dependency.
 from box import Box
 import pygame
 

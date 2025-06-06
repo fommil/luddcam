@@ -14,7 +14,6 @@ import platform
 import time
 
 import numpy as np
-from box import Box
 
 class ASI_BAYER_PATTERN(IntEnum):
     ASI_BAYER_RG = 0  # RGGB
@@ -590,6 +589,12 @@ class Wheel:
             time.sleep(0.1)
             result = self.lib.EFWSetPosition(self.i, s)
         call(result)
+
+    def set_slot_and_wait(self, s):
+        self.set_slot(s)
+        while self.get_slot(s) != s:
+            print("EFW waiting for wheel to reach target")
+            time.sleep(0.1)
 
 def get_normalized_arch():
     raw = platform.machine().lower()

@@ -161,7 +161,7 @@ class Capture:
                 # TODO interval playback, changes exposure and wheel
                 if self.wheel:
                     slot = self.wheel_settings.default
-                    self.wheel.set_slot(slot)
+                    self.wheel.set_slot_and_wait(slot)
                 self.camera.capture_start(exposure)
                 self.capturing = True
                 continue
