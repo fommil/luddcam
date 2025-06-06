@@ -100,6 +100,7 @@ class Capture:
         self.mode = Mode.SINGLE
         self.stage = Stage.STOP
         self.zoom = None
+        self.interval_idx = None
 
         self.thread = threading.Thread(target=self.run, daemon=True, name="Capture")
 
@@ -122,6 +123,7 @@ class Capture:
     def set_mode(self, mode):
         with self.lock:
             self.mode = mode
+            self.interval_idx = None
 
     # Can be called by the UI thread to change the Stage of the lifecycle.
     #
@@ -154,6 +156,7 @@ class Capture:
         capture_zoom = None
         capture_exposure = None
         capture_slot = None
+        capture_interval_idx = None
         while True:
             time.sleep(0.1)
             with self.lock:
@@ -161,6 +164,7 @@ class Capture:
                 mode = self.mode
                 stage = self.stage
                 zoom = self.zoom
+                interval_idx = self.interval_idx
 
             if stage == Stage.STOP:
                 self.camera.capture_stop()
@@ -172,19 +176,41 @@ class Capture:
                 continue
 
             if not capturing:
-                # FIXME intervals
-
                 capture_stage = stage
                 capture_mode = mode
                 capture_zoom = zoom
-                capture_exposure = self.camera_settings.exposure
+
+                if mode == Mode.INTERVALS:
+                    intervals = self.camera_settings.intervals
+                    if not interval_idx:
+                        index, sub = (0, 0)
+                    else:
+                        index, sub = interval_idx
+
+                    if sub >= intervals[index].frames:
+                        index += 1
+                        sub = 0
+                        if index >= len(intervals):
+                            print("repeating the interval plan")
+                            index = 0
+                    capture_interval_idx = (index, sub)
+                    capture_exposure = intervals[index].exposure
+                    if self.wheel:
+                        capture_slot = intervals[index].slot
+                        self.wheel.set_slot_and_wait(capture_slot)
+                    # FIXME interval is always coming up (0, 0)
+                    print(f"interval is starting {capture_interval_idx} with {capture_exposure} at {capture_slot}")
+                else:
+                    # live, single, and repeat
+                    capture_interval_idx = None
+                    capture_exposure = self.camera_settings.exposure
+                    if self.wheel:
+                        capture_slot = self.wheel_settings.default
+                        self.wheel.set_slot_and_wait(capture_slot)
+
                 if stage == Stage.LIVE and capture_exposure > 1:
                     # intentionally limit live exposures
                     capture_exposure = 1
-
-                if self.wheel:
-                    capture_slot = self.wheel_settings.default
-                    self.wheel.set_slot_and_wait(capture_slot)
 
                 self.camera.capture_start(capture_exposure)
                 capturing = True
@@ -217,10 +243,14 @@ class Capture:
                 print(f"...saving to {out}")
 
                 if capture_mode == Mode.SINGLE:
-                    # this allows the single image to stay on
-                    # the screen until the user presses BACK
-                    # to unpause or START to take another.
+                    # this allows the single image to stay on the screen until
+                    # the user presses BACK to unpause or START to take another.
                     self.set_stage(Stage.PAUSE)
+                elif capture_mode == Mode.INTERVALS:
+                    # this allows us to track where we got to and if we paused
+                    # during this exposure, it'll restart at exactly this point.
+                    with self.lock:
+                        self.interval_idx = capture_interval_idx
 
                 # note that fitsio seems to automatically set BZERO and BSCALE
                 metadata = []
@@ -374,14 +404,16 @@ class Menu:
         def select_mode(a, mode):
             print(f"setting mode to {mode}")
             self.capture.set_mode(mode)
+
+        items = [("Single", Mode.SINGLE), ("Repeat", Mode.REPEAT)]
+        if camera_settings.intervals:
+            items.append(("Intervals", Mode.INTERVALS))
         self.menu.add.selector(
             "Mode: ",
-            items=[("Single", Mode.SINGLE), ("Repeat", Mode.REPEAT), ("Intervals", Mode.INTERVALS)],
+            items=items,
             default=0,
             onchange=select_mode,
             align=ALIGN_LEFT)
-
-        # TODO a summary of the runplan and our place in it
 
     def cancel(self):
         if self.capture:
@@ -389,8 +421,10 @@ class Menu:
             self.capture = None
 
     def update(self, events):
-        screen = pygame.display.get_surface()
+        if not self.capture:
+            return
 
+        screen = pygame.display.get_surface()
         if self.menu_active:
             for event in events:
                 if is_action(event) or is_back(event):

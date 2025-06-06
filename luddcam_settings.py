@@ -73,7 +73,7 @@ if (hack := pygame.font.match_font('hack')):
 # wheels: { <wheel_name> : [<str> | null] }
 #
 # CAMERA := { cooling: <int>, gain: <int>, intervals: [ INTERVAL ] }
-# INTERVAL := {exposure: <int>, frames: <int>, slot: <int> }
+# INTERVAL := {exposure: <double>, frames: <int>, slot: <int> }
 class Menu:
     def __init__(self):
         if os.path.isfile(SETTINGS_FILE):
@@ -476,7 +476,7 @@ class Menu:
 
         def clear():
             self.camera_settings().intervals = []
-            rebuild_intervals()
+            self.rebuild_intervals()
 
         intervals = self.camera_settings().intervals
         if not intervals:
