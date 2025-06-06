@@ -446,3 +446,6 @@ class Menu:
                     self.capture.set_stage(Stage.LIVE)
 
         self.view.blit(screen)
+
+# TODO write some tests for the screen rendering, use DSLR fits files to test
+# rendering RGB data.
