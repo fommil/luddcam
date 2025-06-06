@@ -186,7 +186,8 @@ class Capture:
                         index, sub = (0, 0)
                     else:
                         index, sub = interval_idx
-
+                    #print(f"last interval idx was {interval_idx}")
+                    sub += 1
                     if sub >= intervals[index].frames:
                         index += 1
                         sub = 0
@@ -198,8 +199,7 @@ class Capture:
                     if self.wheel:
                         capture_slot = intervals[index].slot
                         self.wheel.set_slot_and_wait(capture_slot)
-                    # FIXME interval is always coming up (0, 0)
-                    print(f"interval is starting {capture_interval_idx} with {capture_exposure} at {capture_slot}")
+                    # print(f"interval is starting {capture_interval_idx} with {capture_exposure} at {capture_slot} in plan {intervals[index]}")
                 else:
                     # live, single, and repeat
                     capture_interval_idx = None
