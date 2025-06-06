@@ -16,7 +16,7 @@ import luddcam_capture
 import luddcam_settings
 import zwo
 
-from luddcam_settings import is_left, is_right, is_up, is_down, is_menu, is_start, is_button
+from luddcam_settings import is_left, is_right, is_up, is_down, is_menu, is_start, is_action, is_back, is_button
 
 APP_PATH = str(pathlib.Path(__file__).parent.resolve())
 FPS = 15

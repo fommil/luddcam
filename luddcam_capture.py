@@ -70,12 +70,20 @@ import pygame
 import pygame_menu
 
 import luddcam_settings
+from luddcam_settings import is_left, is_right, is_up, is_down, is_menu, is_start, is_action, is_back, is_button
+
+ALIGN_LEFT=pygame_menu.locals.ALIGN_LEFT
 
 class Mode(Enum):
+    SINGLE = 0
+    REPEAT = 1
+    INTERVALS = 2
+
+class Stage(Enum):
     LIVE = 0
-    SINGLE = 1
-    REPEAT = 2
-    INTERVALS = 3
+    START = 1
+    PAUSE = 2
+    STOP = 3
 
 # The M in the MVC
 class Capture:
@@ -87,92 +95,99 @@ class Capture:
         self.wheel = wheel
         self.wheel_settings = wheel_settings
 
-        # protects read visibility of mode and zoom
+        # variable that may be mutated by the UI threads
         self.lock = threading.Lock()
-        self.mode = Mode.LIVE
+        self.mode = Mode.SINGLE
+        self.stage = Stage.STOP
         self.zoom = None
-
-        self._pause = threading.Event()
-        self._stop = threading.Event()
 
         self.thread = threading.Thread(target=self.run, daemon=True, name="Capture")
 
         if output_dir:
-            pattern = re.compile(r"IMG_(\d{5})\.fits$")
+            pattern = re.compile(r"IMG_(\d+)\.fits$")
             numbers = []
             for path in Path(self.output_dir).iterdir():
                 match = pattern.match(path.name)
                 if match:
                     numbers.append(int(match.group(1)))
-            self.seq = max(numbers) + 1 if numbers else None
+            self.seq = max(numbers) + 1 if numbers else 1
 
+    # Must be called by the UI thread to start the worker.
     def start(self):
+        with self.lock:
+            self.stage = Stage.LIVE
         return self.thread.start()
 
-    # Can be called by the UI thread to change the mode of operation.
-    #
-    # The caller should check that the output_dir is set before allowing this,
-    # as it will lead to errors.
+    # Can be called by the UI thread to change the Mode of operation.
     def set_mode(self, mode):
         with self.lock:
             self.mode = mode
 
+    # Can be called by the UI thread to change the Stage of the lifecycle.
+    #
+    # Stop will block the caller until the thread completes.
+    def set_stage(self, stage):
+        with self.lock:
+            self.stage = stage
+        if stage == Stage.STOP:
+            self.thread.join()
+
+    # Can be called by the UI thread to inspect the current Stage.
+    def get_stage(self):
+        with self.lock:
+            return self.stage
+
     # Can be called by the UI thread to set the field of view when using digital
-    # zoom. If the camera supports custom fovs this may be utilised, but it is
-    # only necessary if the frameframe demands it. None will unset.
+    # zoom. If the camera supports custom fovs this may be utilised. None will
+    # unset.
     def set_zoom(self, zoom):
         with self.lock:
             self.zoom = zoom
 
-    # Can be called by the UI thread to pause the current capture. May stop the
-    # exposure (e.g. close the shutter).
-    def pause(self):
-        self._pause.set()
-
-    # Can be called by the UI thread to resume a paused capture.
-    def resume(self):
-        self._pause.clear()
-
-    # Can be called by the UI thread to stop and exit the capture. Note that
-    # this will NOT close the camera, but may stop the exposure (e.g. close the
-    # shutter).
-    def stop(self):
-        self._stop.set()
-        self.thread.join()
-
     def run(self):
-        self.capturing = False
-
-        # set at the start of capture...
-        exposure = None
-        slot = None
-        mode = None
-        zoom = None
-        while not self._stop.is_set():
+        # indicates that we started a capture using the given mode.
+        # the remaining variable defined here are captured at the
+        # point the capture started and may not match the latest.
+        capturing = False
+        capture_mode = None
+        capture_stage = None
+        capture_zoom = None
+        capture_exposure = None
+        capture_slot = None
+        while True:
             time.sleep(0.1)
-            if self._pause.is_set():
-                if self.capturing:
+            with self.lock:
+                # thread safe access
+                mode = self.mode
+                stage = self.stage
+                zoom = self.zoom
+
+            if stage == Stage.STOP:
+                self.camera.capture_stop()
+                break
+            elif stage == Stage.PAUSE:
+                if capturing:
+                    capturing = False
                     self.camera.capture_stop()
-                    self.capturing = False
                 continue
 
-            if not self.capturing:
-                with self.lock:
-                    # safe access cross-thread variables, start of the capture
-                    mode = self.mode
-                    zoom = self.zoom
+            if not capturing:
+                # FIXME intervals
 
-                exposure = self.camera_settings.exposure
-                if mode == Mode.LIVE and exposure > 1:
-                    # caps exposures in live mode
-                    exposure = 1
+                capture_stage = stage
+                capture_mode = mode
+                capture_zoom = zoom
+                capture_exposure = self.camera_settings.exposure
+                if stage == Stage.LIVE and capture_exposure > 1:
+                    # intentionally limit live exposures
+                    capture_exposure = 1
 
-                # FIXME interval playback, changes exposure and wheel
                 if self.wheel:
-                    slot = self.wheel_settings.default
-                    self.wheel.set_slot_and_wait(slot)
-                self.camera.capture_start(exposure)
-                self.capturing = True
+                    capture_slot = self.wheel_settings.default
+                    self.wheel.set_slot_and_wait(capture_slot)
+
+                self.camera.capture_start(capture_exposure)
+                capturing = True
                 continue
 
             # we could guard this until it's nearer the time to expect an
@@ -180,53 +195,57 @@ class Capture:
             status = self.camera.capture_wait()
             if status == False:
                 continue
-            elif status == True:
-                self.capturing = False
-                print("capture complete")
-                data = self.camera.capture_finish()
-                if mode == Mode.LIVE:
-                    histogram = exposure == self.camera_settings.exposure
-                    self.view.set_data(None, data, draw_histogram = histogram)
-                elif not self.output_dir:
-                    self.view.set_data(False, data)
-                else:
-                    out = f"{self.output_dir}/IMG_{self.seq:05}.fits"
-                    self.view.set_data(out, data)
-                    print(f"...saving to {out}")
-                    self.seq += 1
-
-                    metadata = []
-                    if data.dtype == "uint16":
-                        metadata.append(("BZERO", 32768))
-                    elif data.dtype == "uint8":
-                        metadata.append(("BZERO", 128))
-                    metadata.append(("BSCALE", 1))
-                    metadata.append(("PROGRAM", "luddcam"))
-                    metadata.append(("DATE", datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")))
-                    metadata.append(("EXPTIME", exposure))
-                    if slot != None:
-                        name = self.wheel_settings.filters[slot] or f"Slot {slot + 1}"
-                        metadata.append(("FILTER", name))
-                    metadata.append(("XPIXSZ", self.camera.pixelsize))
-                    metadata.append(("YPIXSZ", self.camera.pixelsize))
-                    metadata.append(("INSTRUME", self.camera.name))
-                    if (temp := self.camera.get_temp()) != None:
-                        metadata.append(("CCD-TEMP", temp))
-                    if self.camera.is_cooled:
-                        metadata.append(("SET-TEMP", self.camera_settings.cooling))
-                    if self.camera.gain != None:
-                        metadata.append(("GAIN", self.camera.gain))
-                    if self.camera.offset != None:
-                        metadata.append(("OFFSET", self.camera.gain))
-                    if self.camera.bayer:
-                        metadata.append(("BAYERPAT", self.camera.bayer))
-
-                    writer = FitsWriter(self.view, data, out, metadata)
-                    writer.start()
-            else:
-                self.capturing = False
+            elif status == None:
+                capturing = False
                 print("capture failed")
                 self.view.no_signal()
+                continue
+
+            capturing = False
+            print("capture complete")
+            data = self.camera.capture_finish()
+            if capture_stage == Stage.LIVE:
+                # we could potentially draw the histogram if the exposure
+                # was not truncated. Might be useful for flat frames.
+                self.view.set_data(None, data, draw_histogram = False)
+            elif not self.output_dir:
+                self.view.set_data(False, data)
+            else:
+                out = f"{self.output_dir}/IMG_{self.seq:05}.fits"
+                self.seq += 1
+                self.view.set_data(out, data)
+                print(f"...saving to {out}")
+
+                if capture_mode == Mode.SINGLE:
+                    # this allows the single image to stay on
+                    # the screen until the user presses BACK
+                    # to unpause or START to take another.
+                    self.set_stage(Stage.PAUSE)
+
+                # note that fitsio seems to automatically set BZERO and BSCALE
+                metadata = []
+                metadata.append(("PROGRAM", "luddcam"))
+                metadata.append(("DATE", datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")))
+                metadata.append(("EXPTIME", capture_exposure))
+                if capture_slot != None:
+                    name = self.wheel_settings.filters[capture_slot] or f"Slot {capture_slot + 1}"
+                    metadata.append(("FILTER", name))
+                metadata.append(("XPIXSZ", self.camera.pixelsize))
+                metadata.append(("YPIXSZ", self.camera.pixelsize))
+                metadata.append(("INSTRUME", self.camera.name))
+                if (temp := self.camera.get_temp()) != None:
+                    metadata.append(("CCD-TEMP", temp))
+                if self.camera.is_cooled:
+                    metadata.append(("SET-TEMP", self.camera_settings.cooling))
+                if self.camera.gain != None:
+                    metadata.append(("GAIN", self.camera.gain))
+                if self.camera.offset != None:
+                    metadata.append(("OFFSET", self.camera.offset))
+                if self.camera.bayer:
+                    metadata.append(("BAYERPAT", self.camera.bayer))
+
+                writer = FitsWriter(self.view, data, out, metadata)
+                writer.start()
 
         print(f"capture stopped for {self.camera.name}")
 
@@ -273,7 +292,7 @@ class FitsWriter:
 #      invalidate that if they do any other drawing to the screen.
 #
 # The V in the MVC
-class CaptureView:
+class View:
     def __init__(self, width, height):
         self.target_width = width
         self.target_height = height
@@ -334,27 +353,62 @@ class CaptureView:
 # The C in the MVC
 class Menu:
     def __init__(self, output_dir, camera, camera_settings, wheel, wheel_settings):
-        # FIXME a sub-mode selection menu
         # FIXME zoom support
         surface = pygame.display.get_surface()
         w = surface.get_width()
         h = surface.get_height()
 
-        #self.menu = 
-
-        self.view = CaptureView(w, h)
+        self.view = View(w, h)
         if not camera:
             self.capture = None
             self.view.no_signal()
-        else:
-            self.capture = Capture(self.view, output_dir, camera, camera_settings, wheel, wheel_settings)
-            self.capture.start()
+            self.menu = None
+            return
+
+        self.capture = Capture(self.view, output_dir, camera, camera_settings, wheel, wheel_settings)
+        self.capture.start()
+
+        self.menu = luddcam_settings.mk_menu("Capture")
+        self.menu_active = False
+
+        def select_mode(a, mode):
+            print(f"setting mode to {mode}")
+            self.capture.set_mode(mode)
+        self.menu.add.selector(
+            "Mode: ",
+            items=[("Single", Mode.SINGLE), ("Repeat", Mode.REPEAT), ("Intervals", Mode.INTERVALS)],
+            default=0,
+            onchange=select_mode,
+            align=ALIGN_LEFT)
+
+        # TODO a summary of the runplan and our place in it
 
     def cancel(self):
         if self.capture:
-            self.capture.stop()
+            self.capture.set_stage(Stage.STOP)
             self.capture = None
 
     def update(self, events):
         screen = pygame.display.get_surface()
+
+        if self.menu_active:
+            for event in events:
+                if is_action(event) or is_back(event):
+                    self.menu_active = False
+
+            self.menu.update(events)
+            self.menu.draw(screen)
+            return
+
+        for event in events:
+            if is_left(event):
+                # we'll leave the active stage running
+                self.menu_active = True
+            elif is_start(event):
+                self.capture.set_stage(Stage.START)
+            elif is_back(event):
+                stage = self.capture.get_stage()
+                if stage in [Stage.START, Stage.PAUSE]:
+                    self.capture.set_stage(Stage.LIVE)
+
         self.view.blit(screen)

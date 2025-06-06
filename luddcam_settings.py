@@ -162,7 +162,7 @@ class Menu:
 
         for event in events:
             if not navigate:
-                continue;
+                continue
             if is_left(event):
                 self.choice = max(0, self.choice - 1)
             elif is_right(event):
@@ -622,7 +622,7 @@ class Menu:
             cooling = self.camera_settings().cooling
             options = list(range(-20, 20 + 1, 5))
             menu.add.selector(
-                "Target Temp: ",
+                "Cooling: ",
                 items=[(f"{i}°C", i) for i in options],
                 default=options.index(cooling),
                 onchange=update_cooling,
@@ -715,14 +715,14 @@ def is_left(event):
              event.axis == ctrl.JOY_AXIS_X and
              event.value < -ctrl.JOY_DEADZONE) or
             (event.type == pygame.KEYDOWN and
-             event.key == pygame.K_LEFT))
+             event.key == ctrl.KEY_LEFT))
 
 def is_right(event):
     return ((event.type == pygame.JOYAXISMOTION and
              event.axis == ctrl.JOY_AXIS_X and
              event.value > ctrl.JOY_DEADZONE) or
             (event.type == pygame.KEYDOWN and
-             event.key == pygame.K_RIGHT))
+             event.key == ctrl.KEY_RIGHT))
 
 def is_up(event):
     return ((event.type == pygame.JOYAXISMOTION and
@@ -752,7 +752,19 @@ def is_start(event):
     return ((event.type == pygame.JOYBUTTONDOWN and
              event.button == NES_START) or
             (event.type == pygame.KEYDOWN and
-             event.key == pygame.K_SPACE))
+             event.key in [pygame.K_DELETE, ctrl.KEY_TAB]))
+
+def is_action(event):
+    return ((event.type == pygame.JOYBUTTONDOWN and
+             event.button == ctrl.JOY_BUTTON_SELECT) or
+            (event.type == pygame.KEYDOWN and
+             event.key == ctrl.KEY_APPLY))
+
+def is_back(event):
+    return ((event.type == pygame.JOYBUTTONDOWN and
+             event.button == ctrl.JOY_BUTTON_BACK) or
+            (event.type == pygame.KEYDOWN and
+             event.key == ctrl.KEY_BACK))
 
 def is_button(event):
     return (event.type in [pygame.JOYBUTTONDOWN, pygame.KEYDOWN] or
