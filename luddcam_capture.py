@@ -56,16 +56,20 @@
 # https://discuss.pixls.us/t/formats-and-headers-supported-required-by-siril/50531
 
 from datetime import datetime, timezone
-import threading
 from enum import Enum
-import os
 from pathlib import Path
-import time
+import os
 import re
+import threading
+import time
 
 import fitsio
 import numpy as np
 import pygame
+
+import pygame_menu
+
+import luddcam_settings
 
 class Mode(Enum):
     LIVE = 0
@@ -75,7 +79,7 @@ class Mode(Enum):
 
 # The M in the MVC
 class Capture:
-    def __init__(self, view, output_dir, camera, camera_settings, wheel, wheel_settings, mode):
+    def __init__(self, view, output_dir, camera, camera_settings, wheel, wheel_settings):
         self.view = view
         self.output_dir = output_dir
         self.camera = camera
@@ -85,7 +89,7 @@ class Capture:
 
         # protects read visibility of mode and zoom
         self.lock = threading.Lock()
-        self.mode = mode
+        self.mode = Mode.LIVE
         self.zoom = None
 
         self._pause = threading.Event()
@@ -139,8 +143,11 @@ class Capture:
     def run(self):
         self.capturing = False
 
-        exposure = self.camera_settings.exposure
+        # set at the start of capture...
+        exposure = None
         slot = None
+        mode = None
+        zoom = None
         while not self._stop.is_set():
             time.sleep(0.1)
             if self._pause.is_set():
@@ -150,7 +157,17 @@ class Capture:
                 continue
 
             if not self.capturing:
-                # TODO interval playback, changes exposure and wheel
+                with self.lock:
+                    # safe access cross-thread variables, start of the capture
+                    mode = self.mode
+                    zoom = self.zoom
+
+                exposure = self.camera_settings.exposure
+                if mode == Mode.LIVE and exposure > 1:
+                    # caps exposures in live mode
+                    exposure = 1
+
+                # FIXME interval playback, changes exposure and wheel
                 if self.wheel:
                     slot = self.wheel_settings.default
                     self.wheel.set_slot_and_wait(slot)
@@ -167,14 +184,9 @@ class Capture:
                 self.capturing = False
                 print("capture complete")
                 data = self.camera.capture_finish()
-
-                with self.lock:
-                    # safe access cross-thread variables
-                    mode = self.mode
-                    zoom = self.zoom
-
                 if mode == Mode.LIVE:
-                    self.view.set_data(None, data)
+                    histogram = exposure == self.camera_settings.exposure
+                    self.view.set_data(None, data, draw_histogram = histogram)
                 elif not self.output_dir:
                     self.view.set_data(False, data)
                 else:
@@ -250,7 +262,7 @@ class FitsWriter:
             os.fsync(f.fileno())
         print(f"FITS writing elapsed time: {elapsed:.4f} seconds")
         self.view.saved(self.out, True)
-        # TODO if the write fails
+        # TODO when the write fails
 
 # Capture, and its spawned FitsWriter, will update the surface asynchronously
 # (keyed by the file that identifies the capture). The main loop can call this
@@ -266,7 +278,7 @@ class CaptureView:
         self.target_width = width
         self.target_height = height
         self.surface = pygame.Surface((width, height))
-        # TODO placeholder waiting for the first image
+        # TODO placeholder when waiting for the first image
         self.lock = threading.Lock()
 
     # thread safe way to write
@@ -280,24 +292,25 @@ class CaptureView:
 
     # the data designated for the given file.
     #
-    # If out is None it indicates that we're running in LIVE mode.
-    # If out is False it indicates that the output dir was not set.
-    def set_data(self, out, data):
+    # If out is False it indicates that the output dir was not set, and an error
+    # should be displayed on the image. If it is None it means the image will
+    # not be updated any further (e.g. live).
+    def set_data(self, out, data, draw_histogram = True):
         img_rgb = self.scale(data)
         with self.lock:
             pygame.surfarray.blit_array(self.surface, img_rgb)
+            # some basic stats here
 
-    def scale(self, out, img_array):
-        # in order to be able to use blit_array the dims must match the target
-        # dims exactly.
-        height, width = img_array.shape
+    # TODO support RGB data
+    def scale(self, mono):
+        height, width = mono.shape
 
         scale_w = width / self.target_width
         scale_h = height / self.target_height
         scale = min(scale_w, scale_h)
 
         step = max(1, int(scale))
-        img_ds = img_array[::step, ::step]
+        img_ds = mono[::step, ::step]
 
         img_8bit = (img_ds >> 8).astype(np.uint8)
         img_rgb = np.stack([img_8bit]*3, axis=-1)
@@ -322,17 +335,19 @@ class CaptureView:
 class Menu:
     def __init__(self, output_dir, camera, camera_settings, wheel, wheel_settings):
         # FIXME a sub-mode selection menu
-        # TODO zoom support
+        # FIXME zoom support
         surface = pygame.display.get_surface()
         w = surface.get_width()
         h = surface.get_height()
+
+        #self.menu = 
 
         self.view = CaptureView(w, h)
         if not camera:
             self.capture = None
             self.view.no_signal()
         else:
-            self.capture = Capture(w, h, output_dir, camera, camera_settings, wheel, wheel_settings, Mode.LIVE)
+            self.capture = Capture(self.view, output_dir, camera, camera_settings, wheel, wheel_settings)
             self.capture.start()
 
     def cancel(self):

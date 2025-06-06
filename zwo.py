@@ -592,7 +592,7 @@ class Wheel:
 
     def set_slot_and_wait(self, s):
         self.set_slot(s)
-        while self.get_slot(s) != s:
+        while self.get_slot() != s:
             print("EFW waiting for wheel to reach target")
             time.sleep(0.1)
 

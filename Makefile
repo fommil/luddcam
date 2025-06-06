@@ -1,0 +1,5 @@
+.PHONY: run
+
+run:
+	PYTHONUNBUFFERED=1 SDL_VIDEODRIVER=x11 SDL_AUDIODRIVER=dummy SDL_NOMOUSE=1 \
+	python3 luddcam.py 2>&1 | grep -v DETECT_AVX2

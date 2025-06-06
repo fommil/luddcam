@@ -503,8 +503,8 @@ class Menu:
             summary = ""
             total = (e.frames * e.exposure)
             if total > 60:
-                summary = f" ({render_exposure(total)})"
-            menu.add.button(f"{e.frames} x {render_exposure(e.exposure)}{suf}{summary}", align=ALIGN_LEFT)
+                summary = f" ({exposure_render(total)})"
+            menu.add.button(f"{e.frames} x {exposure_render(e.exposure)}{suf}{summary}", align=ALIGN_LEFT)
 
         if intervals:
             menu.add.label(("-" * 12) + " repeat " + ("-" * 12), font_size=16, align=ALIGN_LEFT)
@@ -795,9 +795,11 @@ def exposure_render(i):
     if rounded > 0 and rounded % 60 == 0:
         minutes = rounded // 60
         if minutes == 1:
-            return "1 minute"
-        return f"{minutes} minutes"
+            return "1 min"
+        return f"{minutes} mins"
     frac = Fraction(i).limit_denominator(10000)
+    if frac <= 1:
+        return f"{frac} sec"
     return f"{frac} secs"
 
 class NoCamera:

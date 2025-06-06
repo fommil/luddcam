@@ -145,7 +145,3 @@ if __name__ == '__main__':
     except Exception as e:
         print(f"Failed to run the main: {e}")
         traceback.print_exc()
-
-# Local Variables:
-# compile-command: "PYTHONUNBUFFERED=1 SDL_VIDEODRIVER=x11 SDL_AUDIODRIVER=dummy SDL_NOMOUSE=1 python3 luddcam.py 2>&1 | grep -v DETECT_AVX2"
-# End:
