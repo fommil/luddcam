@@ -98,7 +98,7 @@ class Capture:
         self.thread = threading.Thread(target=self.run, daemon=True, name="Capture")
 
         if output_dir:
-            pattern = re.compile(r'IMG_(\d{5})\.fits$')
+            pattern = re.compile(r"IMG_(\d{5})\.fits$")
             numbers = []
             for path in Path(self.output_dir).iterdir():
                 match = pattern.match(path.name)
@@ -202,7 +202,7 @@ class Capture:
                         metadata.append(("BZERO", 128))
                     metadata.append(("BSCALE", 1))
                     metadata.append(("PROGRAM", "luddcam"))
-                    metadata.append(("DATE", datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S')))
+                    metadata.append(("DATE", datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")))
                     metadata.append(("EXPTIME", exposure))
                     if slot != None:
                         name = self.wheel_settings.filters[slot] or f"Slot {slot + 1}"
@@ -250,7 +250,7 @@ class FitsWriter:
 
     def run(self):
         start = time.perf_counter()
-        with fitsio.FITS(self.out, 'rw') as fits:
+        with fitsio.FITS(self.out, "rw") as fits:
             fits.write(self.data, compress="rice")
             hdu = fits[-1]
             for k, v in self.metadata:
@@ -258,7 +258,7 @@ class FitsWriter:
         end = time.perf_counter()
         elapsed = end - start
         # we're using removable media, let's flush our writes
-        with open(self.out, 'rb+') as f:
+        with open(self.out, "rb+") as f:
             os.fsync(f.fileno())
         print(f"FITS writing elapsed time: {elapsed:.4f} seconds")
         self.view.saved(self.out, True)
