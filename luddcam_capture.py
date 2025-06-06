@@ -73,23 +73,21 @@ class Mode(Enum):
     REPEAT = 2
     INTERVALS = 3
 
+# The M in the MVC
 class Capture:
-    def __init__(self, width, height, output_dir, camera, camera_settings, wheel, wheel_settings, mode):
-        self.lock = threading.Lock()
-        self.target_width = width
-        self.target_height = height
+    def __init__(self, view, output_dir, camera, camera_settings, wheel, wheel_settings, mode):
+        self.view = view
         self.output_dir = output_dir
         self.camera = camera
         self.camera_settings = camera_settings
         self.wheel = wheel
         self.wheel_settings = wheel_settings
+
+        # protects read visibility of mode and zoom
+        self.lock = threading.Lock()
         self.mode = mode
-
-        # we use a pygame surface so that we can draw icons and details
-        self.surface = pygame.Surface((width, height))
-        # TODO placeholder image until we receive data
-
         self.zoom = None
+
         self._pause = threading.Event()
         self._stop = threading.Event()
 
@@ -108,16 +106,12 @@ class Capture:
         return self.thread.start()
 
     # Can be called by the UI thread to change the mode of operation.
+    #
+    # The caller should check that the output_dir is set before allowing this,
+    # as it will lead to errors.
     def set_mode(self, mode):
         with self.lock:
             self.mode = mode
-
-    # Can be called by the UI thread to get the latest capture, resized to the
-    # surface and metadata rendered directly onto it. This is produced once per
-    # capture and re-used to avoid unnecessary allocations.
-    def get_latest(self):
-        with self.lock:
-            return self.surface
 
     # Can be called by the UI thread to set the field of view when using digital
     # zoom. If the camera supports custom fovs this may be utilised, but it is
@@ -147,8 +141,6 @@ class Capture:
 
         exposure = self.camera_settings.exposure
         slot = None
-        writer = None
-
         while not self._stop.is_set():
             time.sleep(0.1)
             if self._pause.is_set():
@@ -176,12 +168,18 @@ class Capture:
                 print("capture complete")
                 data = self.camera.capture_finish()
 
-                if writer:
-                    writer.stale()
+                with self.lock:
+                    # safe access cross-thread variables
+                    mode = self.mode
+                    zoom = self.zoom
 
-                # TODO skip if LIVE
-                if self.output_dir:
+                if mode == Mode.LIVE:
+                    self.view.set_data(None, data)
+                elif not self.output_dir:
+                    self.view.set_data(False, data)
+                else:
                     out = f"{self.output_dir}/IMG_{self.seq:05}.fits"
+                    self.view.set_data(out, data)
                     print(f"...saving to {out}")
                     self.seq += 1
 
@@ -211,20 +209,85 @@ class Capture:
                     if self.camera.bayer:
                         metadata.append(("BAYERPAT", self.camera.bayer))
 
-                    writer = FitsWriter(data, out, self.surface, metadata)
+                    writer = FitsWriter(self.view, data, out, metadata)
                     writer.start()
-
-                img_rgb = self.viewable_array(data)
-                with self.lock:
-                    pygame.surfarray.blit_array(self.surface, img_rgb)
             else:
                 self.capturing = False
                 print("capture failed")
-                # TODO placeholder image to indicate something went wrong
+                self.view.no_signal()
 
         print(f"capture stopped for {self.camera.name}")
 
-    def viewable_array(self, img_array):
+# we write the data to the file, and then update the view with a little icon
+# to denote that the save succeeded or failed. It is possible, for relatively
+# fast exposures that the surface has already moved on and in those cases we
+# should not update.
+#
+# A live writer should stop the python process from exiting, because the file
+# must be written.
+class FitsWriter:
+    def __init__(self, view, data, out, metadata):
+        self.view = view
+        self.data = data
+        self.out = out
+        self.metadata = metadata
+        self.thread = threading.Thread(target=self.run, daemon=False, name=f"FitsWriter {out}")
+
+    def start(self):
+        self.thread.start()
+
+    def run(self):
+        start = time.perf_counter()
+        with fitsio.FITS(self.out, 'rw') as fits:
+            fits.write(self.data, compress="rice")
+            hdu = fits[-1]
+            for k, v in self.metadata:
+                hdu.write_key(k, v)
+        end = time.perf_counter()
+        elapsed = end - start
+        # we're using removable media, let's flush our writes
+        with open(self.out, 'rb+') as f:
+            os.fsync(f.fileno())
+        print(f"FITS writing elapsed time: {elapsed:.4f} seconds")
+        self.view.saved(self.out, True)
+        # TODO if the write fails
+
+# Capture, and its spawned FitsWriter, will update the surface asynchronously
+# (keyed by the file that identifies the capture). The main loop can call this
+# to get the latest version.
+#
+# TODO we could optimise copying the arrays to the surface by using tokens to
+#      identify the last rendered version. But the main loop will need to
+#      invalidate that if they do any other drawing to the screen.
+#
+# The V in the MVC
+class CaptureView:
+    def __init__(self, width, height):
+        self.target_width = width
+        self.target_height = height
+        self.surface = pygame.Surface((width, height))
+        # TODO placeholder waiting for the first image
+        self.lock = threading.Lock()
+
+    # thread safe way to write
+    def blit(self, target):
+        with self.lock:
+            target.blit(self.surface, (0, 0))
+
+    def no_signal(self):
+        # TODO implement, this indicates an error
+        pass
+
+    # the data designated for the given file.
+    #
+    # If out is None it indicates that we're running in LIVE mode.
+    # If out is False it indicates that the output dir was not set.
+    def set_data(self, out, data):
+        img_rgb = self.scale(data)
+        with self.lock:
+            pygame.surfarray.blit_array(self.surface, img_rgb)
+
+    def scale(self, out, img_array):
         # in order to be able to use blit_array the dims must match the target
         # dims exactly.
         height, width = img_array.shape
@@ -249,64 +312,28 @@ class Capture:
         start_y = (h - self.target_height) // 2
         return img_rgb_t[start_x:start_x + self.target_width, start_y:start_y + self.target_height, :]
 
-# we write the data to the file, and then update the surface with a little icon
-# to denote that the save succeeded or failed. It is possible, for relatively
-# fast exposures that the surface has already moved on and in those cases we
-# should not update.
-#
-# A live writer should stop the python process from exiting, because the file
-# must be written.
-class FitsWriter:
-    def __init__(self, data, out, surface, metadata):
-        self.data = data
-        self.out = out
-        self.surface = surface
-        self.metadata = metadata
-        self.thread = threading.Thread(target=self.run, daemon=False, name=f"FitsWriter {out}")
-
-    def start(self):
-        self.thread.start()
-
-    # marks the data as being stale. It must still be written to disk but icon
-    # drawing should be skipped. This is probably going to be rethought with a
-    # class holding the surface, and a filename based lock for doing all the
-    # icon updates.
-    def stale(self):
+    # the file writer indicates a file was (or wasn't) written to disk
+    def saved(self, out, success):
+        # TODO implement
+        # with self.lock:
         pass
 
-    def run(self):
-        start = time.perf_counter()
-        with fitsio.FITS(self.out, 'rw') as fits:
-            fits.write(self.data, compress="rice")
-            hdu = fits[-1]
-            for k, v in self.metadata:
-                hdu.write_key(k, v)
-        end = time.perf_counter()
-        elapsed = end - start
-        # we're using removable media, let's flush our writes
-        with open(self.out, 'rb+') as f:
-            os.fsync(f.fileno())
-        print(f"FITS writing elapsed time: {elapsed:.4f} seconds")
-
-        # TODO if the write succeeded, and the surface is ok to write to then do
-        # so. This is kinda fiddly and needs some thought.
-
+# The C in the MVC
 class Menu:
-    def __init__(self):
-        self.capture = None
-        self.mode = Mode.LIVE
-
-    def update_settings(self, output_dir, camera, camera_settings, wheel, wheel_settings):
-        assert not self.capture
-        if not camera:
-            return
-
+    def __init__(self, output_dir, camera, camera_settings, wheel, wheel_settings):
+        # FIXME a sub-mode selection menu
+        # TODO zoom support
         surface = pygame.display.get_surface()
         w = surface.get_width()
         h = surface.get_height()
 
-        self.capture = Capture(w, h, output_dir, camera, camera_settings, wheel, wheel_settings, self.mode)
-        self.capture.start()
+        self.view = CaptureView(w, h)
+        if not camera:
+            self.capture = None
+            self.view.no_signal()
+        else:
+            self.capture = Capture(w, h, output_dir, camera, camera_settings, wheel, wheel_settings, Mode.LIVE)
+            self.capture.start()
 
     def cancel(self):
         if self.capture:
@@ -314,12 +341,5 @@ class Menu:
             self.capture = None
 
     def update(self, events):
-        # FIXME a sub-mode selection menu
-        surface = pygame.display.get_surface()
-
-        if self.capture:
-            bg = self.capture.get_latest()
-            surface.blit(bg, (0, 0))
-        else:
-            # TODO filler "no camera"
-            surface.fill((0, 0, 0))
+        screen = pygame.display.get_surface()
+        self.view.blit(screen)

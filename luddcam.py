@@ -76,7 +76,7 @@ def main():
     disable_mouse()
 
     settings_menu = luddcam_settings.Menu()
-    capture_menu = luddcam_capture.Menu()
+    capture_menu = None
 
     # always start in settings, so we have to ack the camera etc and forces a
     # save to disk when returning to live view.
@@ -109,7 +109,7 @@ def main():
             elif mode == Mode.SETTINGS and is_menu(event):
                 print("exiting settings")
                 settings_menu.save()
-                capture_menu.update_settings(
+                capture_menu = luddcam_capture.Menu(
                     settings_menu.output_dir(),
                     settings_menu.camera,
                     settings_menu.camera_settings(),

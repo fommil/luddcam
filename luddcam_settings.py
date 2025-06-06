@@ -501,10 +501,10 @@ class Menu:
             if self.wheel:
                 suf = f" with {filter_name(e.slot)}"
             summary = ""
-            total = int((e.frames * e.exposure) / 60)
-            if total > 0:
-                summary = f" ({total} minutes)"
-            menu.add.button(f"{e.frames} x {e.exposure} secs{suf}{summary}", align=ALIGN_LEFT)
+            total = (e.frames * e.exposure)
+            if total > 60:
+                summary = f" ({render_exposure(total)})"
+            menu.add.button(f"{e.frames} x {render_exposure(e.exposure)}{suf}{summary}", align=ALIGN_LEFT)
 
         if intervals:
             menu.add.label(("-" * 12) + " repeat " + ("-" * 12), font_size=16, align=ALIGN_LEFT)
@@ -562,7 +562,7 @@ class Menu:
             align=ALIGN_LEFT)
         menu_add.add.selector(
             "Exposure (seconds): ",
-            items=[(str(Fraction(i).limit_denominator(10000)), i) for i in exposure_options],
+            items=[(exposure_render(i), i) for i in exposure_options],
             default=default_exposure,
             onchange=select_exposure,
             align=ALIGN_LEFT)
@@ -598,11 +598,11 @@ class Menu:
                 return
             self.camera_settings().exposure = e
         exposure_options = self.exposure_options()
-        items = [(str(Fraction(i).limit_denominator(10000)), i) for i in exposure_options]
+        items = [(exposure_render(i), i) for i in exposure_options]
         exposure = self.camera_settings().exposure
         default = exposure_options.index(exposure) if exposure in exposure_options else exposure_options.index(1)
         menu.add.selector(
-            "Exposure (Single): ",
+            "Exposure: ",
             items=items,
             default=default,
             onchange=update_exposure,
@@ -784,6 +784,21 @@ def get_drive(relative):
         return relative
     else:
         return f"{MEDIA_BASE}{relative}"
+
+def exposure_render(i):
+    rounded = int(round(i))
+    if rounded > 0 and rounded % 3600 == 0:
+        hours = rounded // 3600
+        if hours == 1:
+            return "1 hour"
+        return f"{hours} hours"
+    if rounded > 0 and rounded % 60 == 0:
+        minutes = rounded // 60
+        if minutes == 1:
+            return "1 minute"
+        return f"{minutes} minutes"
+    frac = Fraction(i).limit_denominator(10000)
+    return f"{frac} secs"
 
 class NoCamera:
     def __init__(self):
