@@ -216,6 +216,8 @@ class Capture:
                 capturing = True
                 continue
 
+            # TODO guard the capture_wait calls for exposures > 1 sec.
+
             # we could guard this until it's nearer the time to expect an
             # exposure to be ready, if this impacts the camera negatively.
             status = self.camera.capture_wait()
