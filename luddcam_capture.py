@@ -223,9 +223,7 @@ class Capture:
             print("capture complete")
             data = self.camera.capture_finish()
             if capture_stage == Stage.LIVE:
-                # we could potentially draw the histogram if the exposure
-                # was not truncated. Might be useful for flat frames.
-                self.view.set_data(None, data, draw_histogram = False)
+                self.view.set_data(None, data)
             elif not self.output_dir:
                 self.view.set_data(False, data)
             else:
@@ -318,17 +316,42 @@ class View:
     def __init__(self, width, height):
         self.target_width = width
         self.target_height = height
-        self.surface = pygame.Surface((width, height))
-        # TODO placeholder when waiting for the first image
-        self.lock = threading.Lock()
 
-    # thread safe way to write
+        # only ever accessed on the UI thread
+        self.surface = pygame.Surface((width, height))
+        self.zoom = None
+
+        # shared thread variables that must be accessed with a lock
+        self.lock = threading.Lock()
+        self.out = None
+        self.img_raw = None
+        self.img_rgb = None
+
+    # callable by the UI thread
+    def set_zoom(self, level):
+        # TODO
+        pass
+
+    # thread safe way to access
     def blit(self, target):
+        # grabs an atomic view of all the shared thread state
         with self.lock:
-            target.blit(self.surface, (0, 0))
+            out = self.out
+            img_raw = self.img_raw
+            img_rgb = self.img_rgb
+
+        if not img_raw:
+            # TODO placeholder "waiting for capture"
+            pass
+        elif not img_rgb:
+            img_rgb = scale(img_raw, self.target_width, self.target_height)
+            pygame.surfarray.blit_array(self.surface, img_rgb)
+            # TODO stats and icons etc
+
+        target.blit(self.surface, (0, 0))
 
     def no_signal(self):
-        # TODO implement, this indicates an error
+        # TODO placeholder image "no signal from camera"
         pass
 
     # the data designated for the given file.
@@ -336,11 +359,11 @@ class View:
     # If out is False it indicates that the output dir was not set, and an error
     # should be displayed on the image. If it is None it means the image will
     # not be updated any further (e.g. live).
-    def set_data(self, out, data, draw_histogram = True):
-        img_rgb = scale(data, self.target_width, self.target_height)
+    def set_data(self, out, img_raw):
         with self.lock:
-            pygame.surfarray.blit_array(self.surface, img_rgb)
-            # some basic stats here
+            self.out = out
+            self.img_raw = img_raw
+            self.img_rgb = None
 
     # the file writer indicates a file was (or wasn't) written to disk
     def saved(self, out, success):
@@ -401,6 +424,9 @@ class Menu:
             self.menu.update(events)
             self.menu.draw(screen)
             return
+
+        if self.view.zoom:
+            
 
         for event in events:
             if is_left(event):
