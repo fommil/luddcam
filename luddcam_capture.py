@@ -29,11 +29,12 @@
 # using the single shot settings), or intervals (defined in settings). A sets
 # the value and returns to the LIVE view.
 #
-# A selects zoom sub-mode, which introduces a red frames indicating the region
-# of interest, allowing the user to move it around on the live image before
-# another A commits to the zoomed region (directional buttons continue to work
-# when zoomed in). The zoom level is fixed to match the display size. Pressing A
-# returns to the live view. An icon is shown to indicate that it is zoomed in.
+# A selects zoom sub-mode, which introduces a box frame indicating the region of
+# interest, allowing the user to move it around on the live image before another
+# A commits to the zoomed region (directional buttons continue to work when
+# zoomed in). The zoom level is initially fixed to match the display size but
+# may be customisable in the future. Pressing A returns to the live view. An
+# icon is shown to indicate that it is zoomed in.
 #
 # If the media is available, START takes pictures, saves to disk, then previews
 # the latest image on the screen along with a histogram and some basic stats
@@ -99,7 +100,6 @@ class Capture:
         self.lock = threading.Lock()
         self.mode = Mode.SINGLE
         self.stage = Stage.STOP
-        self.zoom = None
         self.interval_idx = None
 
         self.thread = threading.Thread(target=self.run, daemon=True, name="Capture")
@@ -139,13 +139,6 @@ class Capture:
         with self.lock:
             return self.stage
 
-    # Can be called by the UI thread to set the field of view when using digital
-    # zoom. If the camera supports custom fovs this may be utilised. None will
-    # unset.
-    def set_zoom(self, zoom):
-        with self.lock:
-            self.zoom = zoom
-
     def run(self):
         # indicates that we started a capture using the given mode.
         # the remaining variable defined here are captured at the
@@ -153,7 +146,6 @@ class Capture:
         capturing = False
         capture_mode = None
         capture_stage = None
-        capture_zoom = None
         capture_exposure = None
         capture_slot = None
         capture_interval_idx = None
@@ -163,7 +155,6 @@ class Capture:
                 # thread safe access
                 mode = self.mode
                 stage = self.stage
-                zoom = self.zoom
                 interval_idx = self.interval_idx
 
             if stage == Stage.STOP:
@@ -178,7 +169,6 @@ class Capture:
             if not capturing:
                 capture_stage = stage
                 capture_mode = mode
-                capture_zoom = zoom
 
                 if mode == Mode.INTERVALS:
                     intervals = self.camera_settings.intervals
@@ -347,34 +337,10 @@ class View:
     # should be displayed on the image. If it is None it means the image will
     # not be updated any further (e.g. live).
     def set_data(self, out, data, draw_histogram = True):
-        img_rgb = self.scale(data)
+        img_rgb = scale(data, self.target_width, self.target_height)
         with self.lock:
             pygame.surfarray.blit_array(self.surface, img_rgb)
             # some basic stats here
-
-    # TODO support RGB data
-    def scale(self, mono):
-        height, width = mono.shape
-
-        scale_w = width / self.target_width
-        scale_h = height / self.target_height
-        scale = min(scale_w, scale_h)
-
-        step = max(1, int(scale))
-        img_ds = mono[::step, ::step]
-
-        img_8bit = (img_ds >> 8).astype(np.uint8)
-        img_rgb = np.stack([img_8bit]*3, axis=-1)
-        img_rgb_t = np.transpose(img_rgb, (1, 0, 2))
-
-        # faster top-left crop
-        # return img_rgb_t[:self.target_width, :self.target_height, :]
-
-        # central crop
-        w, h = img_rgb_t.shape[:2]
-        start_x = (w - self.target_width) // 2
-        start_y = (h - self.target_height) // 2
-        return img_rgb_t[start_x:start_x + self.target_width, start_y:start_y + self.target_height, :]
 
     # the file writer indicates a file was (or wasn't) written to disk
     def saved(self, out, success):
@@ -451,3 +417,27 @@ class Menu:
 
 # TODO write some tests for the screen rendering, use DSLR fits files to test
 # rendering RGB data.
+
+# TODO support RGB data
+def scale(mono, target_width, target_height):
+    height, width = mono.shape
+
+    scale_w = width / target_width
+    scale_h = height / target_height
+    scale = min(scale_w, scale_h)
+
+    step = max(1, int(scale))
+    img_ds = mono[::step, ::step]
+
+    img_8bit = (img_ds >> 8).astype(np.uint8)
+    img_rgb = np.stack([img_8bit]*3, axis=-1)
+    img_rgb_t = np.transpose(img_rgb, (1, 0, 2))
+
+    # faster top-left crop
+    # return img_rgb_t[:target_width, :target_height, :]
+
+    # central crop
+    w, h = img_rgb_t.shape[:2]
+    start_x = (w - target_width) // 2
+    start_y = (h - target_height) // 2
+    return img_rgb_t[start_x:start_x + target_width, start_y:start_y + target_height, :]
