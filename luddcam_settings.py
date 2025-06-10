@@ -125,7 +125,7 @@ class Menu:
                 return path
 
     def exposure_options(self):
-        exp_min = self.camera.exposure_min
+        exp_min = max(self.camera.exposure_min, 0.0001)
         exp_max = self.camera.exposure_max
 
         options = EXPOSURE_OPTIONS
@@ -203,9 +203,9 @@ class Menu:
             self.refresh = False
 
         def set_camera(c):
-            if c == self.camera:
+            if c is self.camera:
                 return
-            if c == None:
+            if c is None:
                 print("unsetting camera")
                 self.settings.camera = None
                 self.camera = None
@@ -234,9 +234,9 @@ class Menu:
                 self.camera.set_gain(prefs.gain)
 
         def set_guide(c):
-            if c == self.guide:
+            if c is self.guide:
                 return
-            if c == None:
+            if c is None:
                 print("unsetting guide")
                 self.settings.guide = None
                 self.guide = None
@@ -524,7 +524,7 @@ class Menu:
                 filter_choices.append((filter_name(i), i))
 
         exposure_options = self.exposure_options()
-        default_exposure = exposure_options.index(new_entry.exposure)
+        default_exposure = exposure_options.index(new_entry.exposure) if new_entry.exposure in exposure_options else 0
         default_frames = FRAME_OPTIONS.index(new_entry.frames)
         default_filter = 0
 

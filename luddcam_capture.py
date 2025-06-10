@@ -29,12 +29,11 @@
 # using the single shot settings), or intervals (defined in settings). A sets
 # the value and returns to the LIVE view.
 #
-# A selects zoom sub-mode, which introduces a box frame indicating the region of
-# interest, allowing the user to move it around on the live image before another
-# A commits to the zoomed region (directional buttons continue to work when
-# zoomed in). The zoom level is initially fixed to match the display size but
-# may be customisable in the future. Pressing A returns to the live view. An
-# icon is shown to indicate that it is zoomed in.
+# A zooms in, and pressing it again returns to the live view. This only impacts
+# the view, it doesn't impact what is saved to disk. An icon is shown to
+# indicate that it is zoomed in. In the future we may have a preview of the
+# zoomed region, different zoom levels, and directional pad to move the region
+# of interest (especially in preparation for planetary capture).
 #
 # If the media is available, START takes pictures, saves to disk, then previews
 # the latest image on the screen along with a histogram and some basic stats
@@ -86,7 +85,6 @@ class Stage(Enum):
     PAUSE = 2
     STOP = 3
 
-# The M in the MVC
 class Capture:
     def __init__(self, view, output_dir, camera, camera_settings, wheel, wheel_settings):
         self.view = view
@@ -211,9 +209,9 @@ class Capture:
             # we could guard this until it's nearer the time to expect an
             # exposure to be ready, if this impacts the camera negatively.
             status = self.camera.capture_wait()
-            if status == False:
+            if status is False:
                 continue
-            elif status == None:
+            elif status is None:
                 capturing = False
                 print("capture failed")
                 self.view.no_signal()
@@ -306,12 +304,6 @@ class FitsWriter:
 # Capture, and its spawned FitsWriter, will update the surface asynchronously
 # (keyed by the file that identifies the capture). The main loop can call this
 # to get the latest version.
-#
-# TODO we could optimise copying the arrays to the surface by using tokens to
-#      identify the last rendered version. But the main loop will need to
-#      invalidate that if they do any other drawing to the screen.
-#
-# The V in the MVC
 class View:
     def __init__(self, width, height):
         self.target_width = width
@@ -319,7 +311,7 @@ class View:
 
         # only ever accessed on the UI thread
         self.surface = pygame.Surface((width, height))
-        self.zoom = None
+        self.zoom = False
 
         # shared thread variables that must be accessed with a lock
         self.lock = threading.Lock()
@@ -327,12 +319,14 @@ class View:
         self.img_raw = None
         self.img_rgb = None
 
-    # callable by the UI thread
-    def set_zoom(self, level):
-        # TODO
-        pass
+    # Callable by the UI thread, enables or disables digital zoom.
+    def toggle_zoom(self):
+        with self.lock:
+            self.img_rgb = None
+            self.zoom = not self.zoom
 
-    # thread safe way to access
+    # thread safe way to write the surface out to the target, lazily
+    # initialising all aspects of it (rendering is done on the calling thread).
     def blit(self, target):
         # grabs an atomic view of all the shared thread state
         with self.lock:
@@ -340,13 +334,16 @@ class View:
             img_raw = self.img_raw
             img_rgb = self.img_rgb
 
-        if not img_raw:
+        if img_raw is None:
             # TODO placeholder "waiting for capture"
             pass
-        elif not img_rgb:
-            img_rgb = scale(img_raw, self.target_width, self.target_height)
+        elif img_rgb is None:
+            img_rgb = scale(img_raw, self.target_width, self.target_height, self.zoom)
             pygame.surfarray.blit_array(self.surface, img_rgb)
             # TODO stats and icons etc
+            with self.lock:
+                if img_raw is self.img_raw:
+                    self.img_rgb = img_rgb
 
         target.blit(self.surface, (0, 0))
 
@@ -371,10 +368,8 @@ class View:
         # with self.lock:
         pass
 
-# The C in the MVC
 class Menu:
     def __init__(self, output_dir, camera, camera_settings, wheel, wheel_settings):
-        # FIXME zoom support
         surface = pygame.display.get_surface()
         w = surface.get_width()
         h = surface.get_height()
@@ -399,6 +394,8 @@ class Menu:
         items = [("Single", Mode.SINGLE), ("Repeat", Mode.REPEAT)]
         if camera_settings.intervals:
             items.append(("Intervals", Mode.INTERVALS))
+        # TODO persist in the session which Mode is default, so going into the
+        # settings doesn't erase the choice.
         self.menu.add.selector(
             "Mode: ",
             items=items,
@@ -425,9 +422,6 @@ class Menu:
             self.menu.draw(screen)
             return
 
-        if self.view.zoom:
-            
-
         for event in events:
             if is_left(event):
                 # we'll leave the active stage running
@@ -438,23 +432,36 @@ class Menu:
                 stage = self.capture.get_stage()
                 if stage in [Stage.START, Stage.PAUSE]:
                     self.capture.set_stage(Stage.LIVE)
+            elif is_action(event):
+                print("TOGGLE ZOOM")
+                self.view.toggle_zoom()
 
         self.view.blit(screen)
 
 # TODO write some tests for the screen rendering, use DSLR fits files to test
 # rendering RGB data.
 
-# TODO support RGB data
-def scale(mono, target_width, target_height):
+# TODO support 8 bit mono and bayered RGB data
+#
+# zoom means to crop to the target rather than downscale.
+#
+# also, does this work if the target is larger than the original?
+def scale(mono, target_width, target_height, zoom):
     height, width = mono.shape
 
-    scale_w = width / target_width
-    scale_h = height / target_height
-    scale = min(scale_w, scale_h)
+    if zoom:
+        startx = width//2 - target_width//2
+        starty = height//2 - target_height//2
+        print(f"rendering zoomed version ({startx}, {starty}, {target_width}, {target_height})")
+        img_ds = mono[starty:starty + target_height,startx:startx + target_width]
+    else:
+        scale_w = width / target_width
+        scale_h = height / target_height
+        scale = min(scale_w, scale_h)
+        step = max(1, int(scale))
+        img_ds = mono[::step, ::step]
 
-    step = max(1, int(scale))
-    img_ds = mono[::step, ::step]
-
+    # TODO autostretch instead of dropping the lower bits
     img_8bit = (img_ds >> 8).astype(np.uint8)
     img_rgb = np.stack([img_8bit]*3, axis=-1)
     img_rgb_t = np.transpose(img_rgb, (1, 0, 2))
@@ -462,7 +469,7 @@ def scale(mono, target_width, target_height):
     # faster top-left crop
     # return img_rgb_t[:target_width, :target_height, :]
 
-    # central crop
+    # center crop
     w, h = img_rgb_t.shape[:2]
     start_x = (w - target_width) // 2
     start_y = (h - target_height) // 2
