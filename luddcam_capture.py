@@ -304,6 +304,8 @@ class FitsWriter:
 # Capture, and its spawned FitsWriter, will update the surface asynchronously
 # (keyed by the file that identifies the capture). The main loop can call this
 # to get the latest version.
+#
+# TODO shouldn't this just be the Menu? No need to have a separate abstraction.
 class View:
     def __init__(self, width, height):
         self.target_width = width
@@ -410,6 +412,7 @@ class Menu:
 
     def update(self, events):
         if not self.capture:
+            self.view.blit(screen)
             return
 
         screen = pygame.display.get_surface()

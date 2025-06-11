@@ -658,12 +658,9 @@ class Menu:
         return menu
 
 # TODO guiding settings
-# gain
-# exposure
 # dithering
 
-# TODO boost mode for planetary. Zoom box size.
-# (capped frame count), with choice of enabling zoom
+# TODO boost mode for planetary, zoom box size
 
 # TODO cheats
 # (enabled with konami combo)
@@ -673,9 +670,9 @@ class Menu:
 # enable automatic object tracking in boost mode
 # enable autostretching in live / playback
 
-# convenient want to shell out. If we want to make this portable, we'd need
-# to find all uses of this and use portable python libraries instead of
-# linux commands.
+# convenient way to shell out. If we want to make this portable, we'd need to
+# find all uses of this and use portable python libraries instead of linux
+# commands.
 def run(cmd):
     print(f"DEBUG (run): {cmd}")
     return subprocess.run(cmd, shell=True, check=True, text=True, stdout=subprocess.PIPE).stdout.strip()
