@@ -38,7 +38,13 @@ import pygame_menu
 import luddcam_settings
 from luddcam_settings import is_left, is_right, is_up, is_down, is_menu, is_start, is_action, is_back, is_button
 import luddcam_capture
-from luddcam_capture import FitsWriter
+from luddcam_capture import save_fits
+
+class Stage(Enum):
+    LIVE = 0
+    START = 1
+    PAUSE = 2
+    STOP = 3
 
 class Guide:
     def __init__(self, view, output_dir, guide):
@@ -48,15 +54,21 @@ class Guide:
 
         self.lock = threading.Lock()
         self.thread = threading.Thread(target=self.run, daemon=True, name="Capture")
-        self.stop = False
+        self.stage = Stage.STOP
 
     # Must be called by the UI thread to start the worker.
     def start(self):
+        with self.lock:
+            self.stage = Stage.LIVE
         return self.thread.start()
+
+    def pause(self):
+        with self.lock:
+            self.stage = Stage.PAUSE
 
     def stop(self):
         with self.lock:
-            self.stop = True
+            self.stage = Stage.STOP
 
     # Called by the UI thread to initially align the st4 movements with vectors
     # relative to a typical capture in this session. The vectors should be
@@ -71,115 +83,58 @@ class Guide:
     def run(self):
         capturing = False
         capture_exposure = None
+        capture_stage = None
         while True:
             time.sleep(0.1)
             with self.lock:
-                if self.stop:
-                    self.guide.capture_stop()
-                    break
+                stage = self.stage
+
+            if stage == Stage.STOP:
+                self.guide.capture_stop()
+                break
+            if stage == Stage.PAUSE:
+                continue
 
             if not capturing:
                 capture_stage = stage
-                capture_mode = mode
+                capture_exposure = 2 # TODO auto or user guide exposures
 
-                if mode == Mode.INTERVALS:
-                    intervals = self.camera_settings.intervals
-                    if not interval_idx:
-                        index, sub = (0, 0)
-                    else:
-                        index, sub = interval_idx
-                    #print(f"last interval idx was {interval_idx}")
-                    sub += 1
-                    if sub >= intervals[index].frames:
-                        index += 1
-                        sub = 0
-                        if index >= len(intervals):
-                            print("repeating the interval plan")
-                            index = 0
-                    capture_interval_idx = (index, sub)
-                    capture_exposure = intervals[index].exposure
-                    if self.wheel:
-                        capture_slot = intervals[index].slot
-                        self.wheel.set_slot_and_wait(capture_slot)
-                    # print(f"interval is starting {capture_interval_idx} with {capture_exposure} at {capture_slot} in plan {intervals[index]}")
-                else:
-                    # live, single, and repeat
-                    capture_interval_idx = None
-                    capture_exposure = self.camera_settings.exposure
-                    if self.wheel:
-                        capture_slot = self.wheel_settings.default
-                        self.wheel.set_slot_and_wait(capture_slot)
-
-                if stage == Stage.LIVE and capture_exposure > 1:
+                if stage == Stage.LIVE:
                     # intentionally limit live exposures
                     capture_exposure = 1
 
-                self.camera.capture_start(capture_exposure)
+                self.guide.capture_start(capture_exposure)
                 capturing = True
                 continue
 
-            # TODO guard the capture_wait calls for exposures > 1 sec.
+            # TODO guard capture_wait with a timer
 
             # we could guard this until it's nearer the time to expect an
             # exposure to be ready, if this impacts the camera negatively.
-            status = self.camera.capture_wait()
+            status = self.guide.capture_wait()
             if status is False:
                 continue
             elif status is None:
                 capturing = False
-                print("capture failed")
+                print("guide capture failed")
                 self.view.no_signal()
                 continue
 
             capturing = False
-            print("capture complete")
-            data = self.camera.capture_finish()
+            print("guide capture complete")
+            data = self.guide.capture_finish()
             if capture_stage == Stage.LIVE:
                 self.view.set_data(None, data)
-            elif not self.output_dir:
-                self.view.set_data(False, data)
             else:
                 out = f"{self.output_dir}/IMG_{self.seq:05}.fits"
                 self.seq += 1
                 self.view.set_data(out, data)
-                print(f"...saving to {out}")
+                save_fits(out, self.view, capture_exposure, self.guide)
 
-                if capture_mode == Mode.SINGLE:
-                    # this allows the single image to stay on the screen until
-                    # the user presses BACK to unpause or START to take another.
-                    self.set_stage(Stage.PAUSE)
-                elif capture_mode == Mode.INTERVALS:
-                    # this allows us to track where we got to and if we paused
-                    # during this exposure, it'll restart at exactly this point.
-                    with self.lock:
-                        self.interval_idx = capture_interval_idx
+        print(f"guide capture stopped for {self.guide.name}")
 
-                # note that fitsio seems to automatically set BZERO and BSCALE
-                metadata = []
-                metadata.append(("PROGRAM", "luddcam"))
-                metadata.append(("DATE", datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")))
-                metadata.append(("EXPTIME", capture_exposure))
-                if capture_slot != None:
-                    name = self.wheel_settings.filters[capture_slot] or f"Slot {capture_slot + 1}"
-                    metadata.append(("FILTER", name))
-                metadata.append(("XPIXSZ", self.camera.pixelsize))
-                metadata.append(("YPIXSZ", self.camera.pixelsize))
-                metadata.append(("INSTRUME", self.camera.name))
-                if (temp := self.camera.get_temp()) != None:
-                    metadata.append(("CCD-TEMP", temp))
-                if self.camera.is_cooled:
-                    metadata.append(("SET-TEMP", self.camera_settings.cooling))
-                if self.camera.gain != None:
-                    metadata.append(("GAIN", self.camera.gain))
-                if self.camera.offset != None:
-                    metadata.append(("OFFSET", self.camera.offset))
-                if self.camera.bayer:
-                    metadata.append(("BAYERPAT", self.camera.bayer))
-
-                writer = FitsWriter(self.view, data, out, metadata)
-                writer.start()
-
-        print(f"capture stopped for {self.camera.name}")
+# FIXME the view
+# FIXME the menu option to enable calibration and start the guiding
 
 class Menu:
     def __init__(self, output_dir, guide):

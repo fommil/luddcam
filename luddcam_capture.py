@@ -228,7 +228,6 @@ class Capture:
                 out = f"{self.output_dir}/IMG_{self.seq:05}.fits"
                 self.seq += 1
                 self.view.set_data(out, data)
-                print(f"...saving to {out}")
 
                 if capture_mode == Mode.SINGLE:
                     # this allows the single image to stay on the screen until
@@ -240,32 +239,42 @@ class Capture:
                     with self.lock:
                         self.interval_idx = capture_interval_idx
 
-                # note that fitsio seems to automatically set BZERO and BSCALE
-                metadata = []
-                metadata.append(("PROGRAM", "luddcam"))
-                metadata.append(("DATE", datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")))
-                metadata.append(("EXPTIME", capture_exposure))
-                if capture_slot != None:
-                    name = self.wheel_settings.filters[capture_slot] or f"Slot {capture_slot + 1}"
-                    metadata.append(("FILTER", name))
-                metadata.append(("XPIXSZ", self.camera.pixelsize))
-                metadata.append(("YPIXSZ", self.camera.pixelsize))
-                metadata.append(("INSTRUME", self.camera.name))
-                if (temp := self.camera.get_temp()) != None:
-                    metadata.append(("CCD-TEMP", temp))
-                if self.camera.is_cooled:
-                    metadata.append(("SET-TEMP", self.camera_settings.cooling))
-                if self.camera.gain != None:
-                    metadata.append(("GAIN", self.camera.gain))
-                if self.camera.offset != None:
-                    metadata.append(("OFFSET", self.camera.offset))
-                if self.camera.bayer:
-                    metadata.append(("BAYERPAT", self.camera.bayer))
+                if capture_slot is None:
+                    filt = None
+                else:
+                    filt = self.wheel_settings.filters[capture_slot] or f"Slot {capture_slot + 1}"
 
-                writer = FitsWriter(self.view, data, out, metadata)
-                writer.start()
+                save_fits(out, self.view, capture_exposure, self.camera, filt, self.camera_settings.cooling)
 
         print(f"capture stopped for {self.camera.name}")
+
+def save_fits(out, view, exp, camera, filt = None, cooling = None):
+    print(f"...saving to {out}")
+
+    # note that fitsio seems to automatically set BZERO and BSCALE
+    metadata = []
+    metadata.append(("PROGRAM", "luddcam"))
+    metadata.append(("DATE", datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")))
+    metadata.append(("EXPTIME", exp))
+    if filt:
+        metadata.append(("FILTER", filt))
+
+    metadata.append(("XPIXSZ", camera.pixelsize))
+    metadata.append(("YPIXSZ", camera.pixelsize))
+    metadata.append(("INSTRUME", camera.name))
+    if (temp := camera.get_temp()) is not None:
+        metadata.append(("CCD-TEMP", temp))
+    if camera.is_cooled and cooling is not None:
+        metadata.append(("SET-TEMP", cooling))
+    if camera.gain != None:
+        metadata.append(("GAIN", camera.gain))
+    if camera.offset != None:
+        metadata.append(("OFFSET", camera.offset))
+    if camera.bayer:
+        metadata.append(("BAYERPAT", camera.bayer))
+
+    writer = FitsWriter(view, data, out, metadata)
+    writer.start()
 
 # we write the data to the file, and then update the view with a little icon
 # to denote that the save succeeded or failed. It is possible, for relatively
@@ -298,7 +307,8 @@ class FitsWriter:
         with open(self.out, "rb+") as f:
             os.fsync(f.fileno())
         print(f"FITS writing elapsed time: {elapsed:.4f} seconds")
-        self.view.saved(self.out, True)
+        if self.view:
+            self.view.saved(self.out, True)
         # TODO when the write fails
 
 # Capture, and its spawned FitsWriter, will update the surface asynchronously

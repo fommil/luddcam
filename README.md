@@ -48,5 +48,5 @@ Installation is currently a bit tricky, but I'm working on making it a single cl
 
 # Version 2
 
-For version 2 I want to optimise the code (which may mean a rewrite in Rust) so that it can run on a Raspberry Pi Zero with a [GamePi13](https://thepihut.com/products/gamepi13-1-3-lcd-game-console-for-raspberry-pi-240-x240?variant=53991498973569), plus a 3d printed case, with a total cost of under $50.
+For version 2 I want to optimise the code (which may mean a rewrite in Rust) so that it can run on a Raspberry Pi Zero with a [GamePi13](https://thepihut.com/products/gamepi13-1-3-lcd-game-console-for-raspberry-pi-240-x240), plus a 3d printed case, with a total cost of under $50.
 

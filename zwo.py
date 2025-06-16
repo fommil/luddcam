@@ -442,7 +442,8 @@ class Camera:
     def capture_stop(self):
         call(self.lib.ASIStopExposure(self.i))
 
-    # could reuse buffers...
+    # could allow the caller to provide the buffer which opens up the
+    # possibility of reusing buffers or using mmapped files instead of RAM.
     def capture_finish(self):
         width = self.info.MaxWidth
         height = self.info.MaxHeight
