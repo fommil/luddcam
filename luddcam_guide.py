@@ -95,10 +95,15 @@ class Guide:
         capturing = False
         capture_exposure = None
         capture_stage = None
+        last_stage = None
         while True:
             time.sleep(0.1)
             with self.lock:
                 stage = self.stage
+            if last_stage != stage:
+                # FIXME common state transition code
+                pass
+            last_stage = stage
 
             if stage == Stage.STOP:
                 self.guide.capture_stop()
@@ -214,9 +219,5 @@ class Menu:
             elif is_action(event):
                 print("TOGGLE GUIDE ZOOM")
                 self.view.toggle_zoom()
-
-        # TODO auto pause if we're in LIVE and haven't rendered the view
-        # recently. Maybe that should be considered to be a different stage than
-        # pausing capture... live but not present.
 
         self.view.blit(screen)

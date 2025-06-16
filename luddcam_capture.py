@@ -120,6 +120,7 @@ class Capture:
     # Can be called by the UI thread to change the Mode of operation.
     def set_mode(self, mode):
         with self.lock:
+            # FIXME should we force it to LIVE?
             self.mode = mode
             self.interval_idx = None
 
@@ -147,6 +148,8 @@ class Capture:
         capture_exposure = None
         capture_slot = None
         capture_interval_idx = None
+        last_stage = None
+        last_mode = None
         while True:
             time.sleep(0.1)
             with self.lock:
@@ -154,6 +157,12 @@ class Capture:
                 mode = self.mode
                 stage = self.stage
                 interval_idx = self.interval_idx
+            if last_stage != stage or last_mode != node:
+                # FIXME common state transition code (if LIVE is always forced
+                # we can drop last_mode)
+                pass
+            last_stage = stage
+            last_mode = mode
 
             if stage == Stage.STOP:
                 self.camera.capture_stop()
@@ -459,10 +468,10 @@ class Menu:
             elif is_action(event):
                 print("TOGGLE ZOOM")
                 self.view.toggle_zoom()
-
-        # TODO auto pause if we're in LIVE and haven't rendered the view
-        # recently. Maybe that should be considered to be a different stage than
-        # pausing capture... live but not present.
+            # FIXME back should put LIVE into PAUSE, or we should have a method
+            # called "defocus" or something that achieves the same thing. Then
+            # when update is called and the defocussed flag was set we can turn
+            # PAUSE into LIVE. And similar for guiding.
 
         self.view.blit(screen)
 
