@@ -158,11 +158,19 @@ class Capture:
             if stage == Stage.STOP:
                 self.camera.capture_stop()
                 break
-            elif stage == Stage.PAUSE:
+            if stage == Stage.PAUSE:
                 if capturing:
                     capturing = False
+                    capture_stage = None
                     self.camera.capture_stop()
+                    self.view.paused()
                 continue
+            if stage == Stage.LIVE:
+                if capturing and capture_stage is Stage.START:
+                    capturing = False
+                    capture_stage = None
+                    self.camera.capture_stop()
+                    continue
 
             if not capturing:
                 capture_stage = stage
@@ -315,7 +323,7 @@ class FitsWriter:
 # (keyed by the file that identifies the capture). The main loop can call this
 # to get the latest version.
 #
-# TODO shouldn't this just be the Menu? No need to have a separate abstraction.
+# This is abstracted out so that it can be reused by guiding.
 class View:
     def __init__(self, width, height):
         self.target_width = width
@@ -352,7 +360,7 @@ class View:
         elif img_rgb is None:
             img_rgb = scale(img_raw, self.target_width, self.target_height, self.zoom)
             pygame.surfarray.blit_array(self.surface, img_rgb)
-            # TODO stats and icons etc
+            # TODO stats and icons etc (input parameters)
             with self.lock:
                 if img_raw is self.img_raw:
                     self.img_rgb = img_rgb
@@ -373,6 +381,10 @@ class View:
             self.out = out
             self.img_raw = img_raw
             self.img_rgb = None
+
+    def paused(self):
+        # TODO implement
+        pass
 
     # the file writer indicates a file was (or wasn't) written to disk
     def saved(self, out, success):
@@ -440,14 +452,17 @@ class Menu:
                 # we'll leave the active stage running
                 self.menu_active = True
             elif is_start(event):
-                self.capture.set_stage(Stage.START)
-            elif is_back(event):
-                stage = self.capture.get_stage()
-                if stage in [Stage.START, Stage.PAUSE]:
-                    self.capture.set_stage(Stage.LIVE)
+                if self.capture.get_stage() == Stage.START:
+                    self.capture.set_stage(Stage.PAUSE)
+                else:
+                    self.capture.set_stage(Stage.START)
             elif is_action(event):
                 print("TOGGLE ZOOM")
                 self.view.toggle_zoom()
+
+        # TODO auto pause if we're in LIVE and haven't rendered the view
+        # recently. Maybe that should be considered to be a different stage than
+        # pausing capture... live but not present.
 
         self.view.blit(screen)
 

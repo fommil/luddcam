@@ -26,6 +26,8 @@ from enum import Enum
 from pathlib import Path
 import os
 import re
+import random
+import string
 import threading
 import time
 
@@ -38,7 +40,7 @@ import pygame_menu
 import luddcam_settings
 from luddcam_settings import is_left, is_right, is_up, is_down, is_menu, is_start, is_action, is_back, is_button
 import luddcam_capture
-from luddcam_capture import save_fits
+from luddcam_capture import save_fits, View
 
 class Stage(Enum):
     LIVE = 0
@@ -49,11 +51,14 @@ class Stage(Enum):
 class Guide:
     def __init__(self, view, output_dir, guide):
         self.view = view
-        self.output_dir = output_dir
+        rdm = ''.join(random.choices(string.ascii_letters, k=8))
+        self.debug_dir = f"{output_dir}/guiding/{rdm}/"
+        print(f"setting guiding debug directory to {self.debug_dir}")
         self.guide = guide
+        self.seq = 0
 
         self.lock = threading.Lock()
-        self.thread = threading.Thread(target=self.run, daemon=True, name="Capture")
+        self.thread = threading.Thread(target=self.run, daemon=True, name="Guide")
         self.stage = Stage.STOP
 
     # Must be called by the UI thread to start the worker.
@@ -62,13 +67,19 @@ class Guide:
             self.stage = Stage.LIVE
         return self.thread.start()
 
-    def pause(self):
+    # Can be called by the UI thread to change the Stage of the lifecycle.
+    #
+    # Stop will block the caller until the thread completes.
+    def set_stage(self, stage):
         with self.lock:
-            self.stage = Stage.PAUSE
+            self.stage = stage
+        if stage == Stage.STOP:
+            self.thread.join()
 
-    def stop(self):
+    # Can be called by the UI thread to inspect the current Stage.
+    def get_stage(self):
         with self.lock:
-            self.stage = Stage.STOP
+            return self.stage
 
     # Called by the UI thread to initially align the st4 movements with vectors
     # relative to a typical capture in this session. The vectors should be
@@ -93,7 +104,18 @@ class Guide:
                 self.guide.capture_stop()
                 break
             if stage == Stage.PAUSE:
+                if capturing:
+                    capturing = False
+                    capture_stage = None
+                    self.guide.capture_stop()
+                    self.view.paused()
                 continue
+            if stage == Stage.LIVE:
+                if capturing and capture_stage is Stage.START:
+                    capturing = False
+                    capture_stage = None
+                    self.guide.capture_stop()
+                    continue
 
             if not capturing:
                 capture_stage = stage
@@ -126,18 +148,75 @@ class Guide:
             if capture_stage == Stage.LIVE:
                 self.view.set_data(None, data)
             else:
-                out = f"{self.output_dir}/IMG_{self.seq:05}.fits"
+                out = f"{self.debug_dir}/IMG_{self.seq:05}.fits"
                 self.seq += 1
+
                 self.view.set_data(out, data)
+
+                # eventually this will only be when debugging is enabled
                 save_fits(out, self.view, capture_exposure, self.guide)
 
-        print(f"guide capture stopped for {self.guide.name}")
+                # TODO do the guiding calculations here and send corrections
 
-# FIXME the view
-# FIXME the menu option to enable calibration and start the guiding
+        print(f"guide capture stopped for {self.guide.name}")
 
 class Menu:
     def __init__(self, output_dir, guide):
         surface = pygame.display.get_surface()
         w = surface.get_width()
         h = surface.get_height()
+
+        self.view = View(w, h)
+
+        if not guide:
+            self.guide = None
+            self.view.no_signal()
+            self.menu = None
+            return
+
+        self.guide = Guide(self.view, output_dir, guide)
+        self.guide.start()
+
+        self.menu = luddcam_settings.mk_menu("Guide")
+        self.menu_active = False
+
+        # FIXME add menu to enable calibration and start the guiding
+
+    def cancel(self):
+        if self.guide:
+            self.guide.set_stage(Stage.STOP)
+            self.guide = None
+
+    def update(self, events):
+        if not self.guide:
+            self.view.blit(screen)
+            return
+
+        screen = pygame.display.get_surface()
+        if self.menu_active:
+            for event in events:
+                if is_action(event) or is_back(event):
+                    self.menu_active = False
+
+            self.menu.update(events)
+            self.menu.draw(screen)
+            return
+
+        for event in events:
+            if is_left(event):
+                # we'll leave the active stage running
+                self.menu_active = True
+            elif is_start(event):
+                if self.capture.get_stage() == Stage.START:
+                    self.capture.set_stage(Stage.LIVE)
+                else:
+                    self.capture.set_stage(Stage.START)
+            elif is_action(event):
+                print("TOGGLE GUIDE ZOOM")
+                self.view.toggle_zoom()
+
+        # TODO auto pause if we're in LIVE and haven't rendered the view
+        # recently. Maybe that should be considered to be a different stage than
+        # pausing capture... live but not present.
+
+        self.view.blit(screen)

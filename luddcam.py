@@ -133,6 +133,8 @@ def main():
         elif mode == Mode.CAPTURE:
             capture_menu.update(events)
 
+        # FIXME "back" should give the list of modes: capture and guide
+
         pygame.display.update()
         clock.tick(FPS)
 
