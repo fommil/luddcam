@@ -120,7 +120,7 @@ class Capture:
     # Can be called by the UI thread to change the Mode of operation.
     def set_mode(self, mode):
         with self.lock:
-            # FIXME should we force it to LIVE?
+            # TODO should we force it to LIVE?
             self.mode = mode
             self.interval_idx = None
 
@@ -158,7 +158,7 @@ class Capture:
                 stage = self.stage
                 interval_idx = self.interval_idx
             if last_stage != stage or last_mode != node:
-                # FIXME common state transition code (if LIVE is always forced
+                # TODO common state transition code (if LIVE is always forced
                 # we can drop last_mode)
                 pass
             last_stage = stage
@@ -468,7 +468,7 @@ class Menu:
             elif is_action(event):
                 print("TOGGLE ZOOM")
                 self.view.toggle_zoom()
-            # FIXME back should put LIVE into PAUSE, or we should have a method
+            # TODO back should put LIVE into PAUSE, or we should have a method
             # called "defocus" or something that achieves the same thing. Then
             # when update is called and the defocussed flag was set we can turn
             # PAUSE into LIVE. And similar for guiding.

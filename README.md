@@ -46,6 +46,25 @@ Another option is the [Waveshare Game HAT](https://www.amazon.co.uk/dp/B07G57BC3
 
 Installation is currently a bit tricky, but I'm working on making it a single click: follow the steps in `INSTALL.md`.
 
+# Version 1
+
+## Alpha
+
+- can live focus ✅
+- can capture data from a plan ✅
+- can run and store a guiding calibration sequence
+- can store debugging guiding exposures
+
+## Beta
+
+- auto guiding
+- burst / planetary capture with RoI
+
+## MVP
+
+- image overlays
+- playback
+
 # Version 2
 
 For version 2 I want to optimise the code (which may mean a rewrite in Rust) so that it can run on a Raspberry Pi Zero with a [GamePi13](https://thepihut.com/products/gamepi13-1-3-lcd-game-console-for-raspberry-pi-240-x240), plus a 3d printed case, with a total cost of under $50.

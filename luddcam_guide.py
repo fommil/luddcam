@@ -101,7 +101,7 @@ class Guide:
             with self.lock:
                 stage = self.stage
             if last_stage != stage:
-                # FIXME common state transition code
+                # TODO common state transition code
                 pass
             last_stage = stage
 
