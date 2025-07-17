@@ -51,9 +51,11 @@ Installation is currently a bit tricky, but I'm working on making it a single cl
 ## Alpha
 
 - can live focus ✅
-- can capture data from a plan ✅
-- can run and store a guiding calibration sequence
-- can store debugging guiding exposures
+- can frame the shot ✅
+- can specificy intervals with filters ✅
+- can store exposures ✅
+- can store guiding calibration
+- can store guiding exposures
 
 ## Beta
 
