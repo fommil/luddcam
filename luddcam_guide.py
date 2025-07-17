@@ -193,11 +193,12 @@ class Menu:
             self.guide = None
 
     def update(self, events):
+        screen = pygame.display.get_surface()
+
         if not self.guide:
             self.view.blit(screen)
             return
 
-        screen = pygame.display.get_surface()
         if self.menu_active:
             for event in events:
                 if is_action(event) or is_back(event):

@@ -12,11 +12,15 @@ import pygame
 import pygame_menu
 import pygame_menu.controls as ctrl
 
-import luddcam_capture
 import luddcam_settings
+import luddcam_capture
+import luddcam_guide
 import zwo
 
 from luddcam_settings import is_left, is_right, is_up, is_down, is_menu, is_start, is_action, is_back, is_button
+
+ALIGN_LEFT=pygame_menu.locals.ALIGN_LEFT
+ALIGN_RIGHT=pygame_menu.locals.ALIGN_RIGHT
 
 APP_PATH = str(pathlib.Path(__file__).parent.resolve())
 FPS = 15
@@ -54,9 +58,11 @@ def disable_mouse():
     pygame.mouse.set_visible(False)
 
 class Mode(IntEnum):
-    BLANK = 0
+    BLANK    = 0
     SETTINGS = 1
-    CAPTURE = 2
+    CHOOSE   = 2
+    CAPTURE  = 3
+    GUIDE    = 4
 
 def main():
     pygame.display.init()
@@ -77,6 +83,7 @@ def main():
 
     settings_menu = luddcam_settings.Menu()
     capture_menu = None
+    guide_menu = None
 
     # always start in settings, so we have to ack the camera etc and forces a
     # save to disk when returning to live view.
@@ -91,6 +98,11 @@ def main():
         nonlocal mode
         mode = last
 
+    choose_menu = luddcam_settings.mk_menu("Choose Mode")
+    choose_menu.add.vertical_margin(10)
+    choose_menu.add.button("Capture", action=lambda: push(Mode.CAPTURE), align=ALIGN_LEFT)
+    choose_menu.add.button("Guide", action=lambda: push(Mode.GUIDE), align=ALIGN_LEFT)
+
     while True:
         events = pygame.event.get()
         for event in events:
@@ -103,7 +115,7 @@ def main():
             elif mode == Mode.BLANK and is_button(event):
                 print("waking screen")
                 pop()
-            elif mode > Mode.SETTINGS and is_up(event):
+            elif mode > Mode.CHOOSE and is_up(event):
                 print("blanking screen")
                 push(Mode.BLANK)
             elif mode == Mode.SETTINGS and is_menu(event):
@@ -115,25 +127,37 @@ def main():
                     settings_menu.camera_settings(),
                     settings_menu.wheel,
                     settings_menu.wheel_settings())
+                guide_menu = luddcam_guide.Menu(
+                    settings_menu.output_dir(),
+                    settings_menu.guide
+                )
                 pop()
             elif mode > Mode.SETTINGS and is_menu(event):
                 print("entering settings")
                 # TODO warning / ack about ending capture sessions
                 #
                 # TODO preserve capture mode
-                #
-                # Guiding state should be preserved
                 capture_menu.cancel()
+                guide_menu.cancel()
                 push(Mode.SETTINGS)
+            elif mode > Mode.CHOOSE and is_back(event):
+                print("showing submenu choice")
+                push(Mode.CHOOSE)
+            elif mode == Mode.CHOOSE and is_back(event):
+                print("exiting choice")
+                pop()
 
         if mode == Mode.BLANK:
             surface.fill((0, 0, 0))
         elif mode == Mode.SETTINGS:
             settings_menu.update(events)
+        elif mode == Mode.CHOOSE:
+            choose_menu.update(events)
+            choose_menu.draw(surface)
         elif mode == Mode.CAPTURE:
             capture_menu.update(events)
-
-        # FIXME "back" should give the list of modes: capture and guide
+        elif mode == Mode.GUIDE:
+            guide_menu.update(events)
 
         pygame.display.update()
         clock.tick(FPS)

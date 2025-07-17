@@ -157,7 +157,7 @@ class Capture:
                 mode = self.mode
                 stage = self.stage
                 interval_idx = self.interval_idx
-            if last_stage != stage or last_mode != node:
+            if last_stage != stage or last_mode != mode:
                 # TODO common state transition code (if LIVE is always forced
                 # we can drop last_mode)
                 pass
@@ -442,11 +442,12 @@ class Menu:
             self.capture = None
 
     def update(self, events):
+        screen = pygame.display.get_surface()
+
         if not self.capture:
             self.view.blit(screen)
             return
 
-        screen = pygame.display.get_surface()
         if self.menu_active:
             for event in events:
                 if is_action(event) or is_back(event):
