@@ -50,21 +50,17 @@ Installation is currently a bit tricky, but I'm working on making it a single cl
 
 ## Alpha
 
-- can live focus ✅
-- can frame the shot ✅
-- can specificy intervals with filters ✅
-- can store exposures ✅
-- can store guiding calibration
-- can store guiding exposures
+- live focus ✅
+- frame the shot ✅
+- define filter intervals ✅
+- store exposures in FITS ✅
+- store guiding calibration and exposures
+- all views have info overlays
 
 ## Beta
 
 - auto guiding
 - burst / planetary capture with RoI
-
-## MVP
-
-- image overlays
 - playback
 
 # Version 2
