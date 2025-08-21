@@ -6,6 +6,8 @@ LuddCam supports a few carefully chosen "cheat codes", like electronic filter wh
 
 Whether you're a DIY tinker-photographer, an analog romantic, or just someone who enjoys feeling the click of a real button under a dark sky, LuddCam is for you.
 
+**NOTE: I never managed to get this to an MVP, I've had to pause my workdue to an otherwise busy schedule, but I hope to come back to it within the next year or so.**
+
 # LuddScore
 
 Sometimes we just want to take the best picture possible and that's not possible the Luddite way: more technology does demonstrably make things better (when it works!). To help even the field, try computing your Luddite Score, and use it as a way to avoid comparing yourself with unatainable god-like images on astrobin.
