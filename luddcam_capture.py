@@ -314,7 +314,8 @@ class FitsWriter:
     def run(self):
         start = time.perf_counter()
         with fitsio.FITS(self.out, "rw") as fits:
-            fits.write(self.data, compress="rice")
+            # rice encoding can be lossy for floating point
+            fits.write(self.data, compress="gzip1")
             hdu = fits[-1]
             for k, v in self.metadata:
                 hdu.write_key(k, v)
