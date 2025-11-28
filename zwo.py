@@ -1,10 +1,3 @@
-# this file is a placeholder until I figure out the exact API I need
-# and then swap to using indilib for maximum device support. This
-# assumes that libasi has been installed already so that the native
-# libs are available on the LD path.
-#
-# https://github.com/indilib/pyindi-client
-# https://www.indilib.org/api/index.html
 # https://indilib.org/forum/development/15497-zwo-unity-gain-and-offset-calculations.html
 
 from ctypes import *
@@ -270,7 +263,34 @@ class AsiCamera2:
             cameras.append(Camera(self.lib, i))
         return cameras
 
+# the Camera duck api
+#
+# read only parameters:
+#
+# name - string (human readable)
+# bitdepth - int
+# is_cooled - boolean
+# has_gain - boolean
+# gain - number
+# gain_{min,max,default,unity} - number(s)
+# offset - number
+# exposure_{min,max} - number(s)
+# bayer - string pattern
+# pixelsize - number
+# guide - boolean
+#
+# methods:
+#
+# get_temp() - current temp
+# set_cooling(temp)
+# set_gain(gain)
+#
+# capture_start(exposure) - returns immediately
+# capture_wait() - True if ready, False if processing, None if failed
+# capture_stop() - exit early
+# capture_finish() - returns a numpy matrix image (usually 8 or 16 bit)
 class Camera:
+
     def __init__(self, lib, i):
         self.lib = lib
         self.i = i
@@ -291,6 +311,7 @@ class Camera:
 
         call(self.lib.ASIGetCameraProperty(byref(self.info), self.i))
         self.name = self.info.name()
+        self.bitdepth = self.info.BitDepth
         # print(f"{self.info}")
 
         if self.info.IsColorCam == ASI_BOOL.ASI_TRUE:

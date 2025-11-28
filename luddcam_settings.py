@@ -26,13 +26,24 @@ import pygame
 import pygame_menu
 import pygame_menu.controls as ctrl
 
+import mocks
 import zwo
+import touptek
 
 ALIGN_LEFT=pygame_menu.locals.ALIGN_LEFT
 ALIGN_RIGHT=pygame_menu.locals.ALIGN_RIGHT
 
 # lets users optionally name their filter slots
-FILTER_OPTIONS = ["undefined", "L", "R", "G", "B", "Sii", "Ha", "Oiii", "Ha Oiii", "Ha Oiii Hb", "Sii Oiii", "Dark" ]
+FILTER_OPTIONS = ["undefined",
+                  # broadband
+                  "L", "R", "G", "B",
+                  "u'", "g'", "r'", "i'", "z'",
+                  # narrowband
+                  "S", "Ha", "O", "Ar"
+                  # multiband
+                  "HaO", "HaOHb", "SO", "SHb",
+                  # jokers
+                  "Dark" ]
 
 # Exposure times, in seconds.
 #
@@ -42,8 +53,8 @@ FILTER_OPTIONS = ["undefined", "L", "R", "G", "B", "Sii", "Ha", "Oiii", "Ha Oiii
 # When displaying on the screen we try to use
 # Fraction(...).limit_denominator(10000)
 EXPOSURE_OPTIONS = sorted(set(
-    # standard DSLR shutter
-    [1/8000, 1/4000, 1/2000, 1/1000, 1/500, 1/250, 1/125, 1/60, 1/30, 1/15, 1/12, 1/10, 1/8, 1/4, 1/2, 1, 2, 4, 8, 15, 30] +
+    # typical DSLR shutter
+    [1/8000, 1/4000, 1/2000, 1/1000, 1/500, 1/250, 1/125, 1/60, 1/30, 1/15, 1/12, 1/10, 1/8, 1/4, 1/2, 1, 2, 4, 5, 8, 10, 15, 30] +
     # sensible DSO values
     [60, 120, 180, 240, 300, 600, 900, 1200]))
 
@@ -82,7 +93,9 @@ class Menu:
         else:
             self.settings = Box(default_box=True)
 
+        self.mocks = mocks.Mocks()
         self.zwo_asi = zwo.AsiCamera2()
+        self.toupcam = touptek.Toupcam()
         self.zwo_efw = zwo.EfwFilter()
         self.refresh = True
 
@@ -119,10 +132,13 @@ class Menu:
             return self.settings.wheels[self.settings.wheel]
 
     def output_dir(self):
-        if self.settings.drive:
+        if mocks.test_mode:
+            path = mocks.output_dir()
+        elif self.settings.drive:
             path = get_drive(self.settings.drive)
-            if os.path.isdir(path) and os.access(path, os.W_OK):
-                return path
+
+        if os.path.isdir(path) and os.access(path, os.W_OK):
+            return path
 
     def exposure_options(self):
         exp_min = max(self.camera.exposure_min, 0.0001)
@@ -173,6 +189,10 @@ class Menu:
         menu.draw(pygame.display.get_surface())
 
     def format_drive(self):
+        if mocks.test_mode:
+            print("simulated format")
+            return
+
         if sys.platform != "linux":
             print(f"ERROR: 'format' is not supported on {sys.platform}")
             return
@@ -195,11 +215,15 @@ class Menu:
         # don't attach it. That way everything "just works" by default if it is
         # the only thing that is plugged in.
         if self.refresh:
-            print("refreshing ZWO hardware")
-            zwo_cameras = self.zwo_asi.cameras()
-            self.cameras = [a for a in zwo_cameras if not a.guide]
-            self.guides = [a for a in zwo_cameras if a.guide]
-            self.wheels = self.zwo_efw.wheels()
+            print("refreshing hardware")
+            if mocks.test_mode:
+                all_cameras = self.mocks.cameras()
+                self.wheels = self.mocks.wheels()
+            else:
+                all_cameras = self.zwo_asi.cameras() + self.toupcam.cameras()
+                self.wheels = self.zwo_efw.wheels()
+            self.cameras = [a for a in all_cameras if not a.guide]
+            self.guides = [a for a in all_cameras if a.guide]
             self.refresh = False
 
         def set_camera(c):
@@ -221,7 +245,7 @@ class Menu:
             if c.is_cooled and prefs.cooling == {}:
                 prefs.cooling = 0
             if c.has_gain and prefs.gain == {}:
-                if c.gain_unity != None:
+                if c.gain_unity is not None:
                     prefs.gain = c.gain_unity
                 else:
                     prefs.gain = c.gain_default
@@ -628,9 +652,6 @@ class Menu:
                 onchange=update_cooling,
                 align=ALIGN_LEFT)
 
-        # TODO binning
-        # TODO anti-dew heater
-
         if self.camera.has_gain:
             def update_gain(a, gain):
                 if not initialized or gain == self.camera_settings().gain:
@@ -705,7 +726,9 @@ def rebuild_menu(menu, fn, count_from_end = False):
 
 def mk_menu(title = "Settings"):
     surface = pygame.display.get_surface()
-    return pygame_menu.Menu(title, surface.get_width(), surface.get_height(), center_content=False, theme=THEME)
+    return pygame_menu.Menu(title, surface.get_width(), surface.get_height(), center_content=False, theme=THEME, keyboard_ignore_nonphysical = not mocks.test_mode)
+
+# TODO should probably use the existing static methods in pygame_menu.controls
 
 def is_left(event):
     return ((event.type == pygame.JOYAXISMOTION and
@@ -779,6 +802,9 @@ elif sys.platform == "darwin":
     MEDIA_BASE = "/Volumes/"
 
 def list_drives():
+    if mocks.test_mode:
+        return ["output"]
+
     if sys.platform == "win32":
         import win32file
         return [

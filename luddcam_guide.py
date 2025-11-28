@@ -40,7 +40,8 @@ import pygame_menu
 import luddcam_settings
 from luddcam_settings import is_left, is_right, is_up, is_down, is_menu, is_start, is_action, is_back, is_button
 import luddcam_capture
-from luddcam_capture import save_fits, View
+from luddcam_capture import mk_metadata, save_fits, View
+import mocks
 
 class Stage(Enum):
     LIVE = 0
@@ -97,10 +98,10 @@ class Guide:
         capture_stage = None
         last_stage = None
         while True:
-            time.sleep(0.1)
+            time.sleep(0.1 / mocks.warp)
             with self.lock:
                 stage = self.stage
-            if last_stage != stage:
+            if last_stage is not stage:
                 # TODO common state transition code
                 pass
             last_stage = stage
@@ -150,16 +151,17 @@ class Guide:
             capturing = False
             print("guide capture complete")
             data = self.guide.capture_finish()
+            metadata = mk_metadata(capture_exposure, self.guide)
             if capture_stage == Stage.LIVE:
                 self.view.set_data(None, data)
             else:
-                out = f"{self.debug_dir}/IMG_{self.seq:05}.fits"
+                out = f"{self.debug_dir}/IMG_{self.seq:05}.fit"
                 self.seq += 1
 
                 self.view.set_data(out, data)
 
                 # eventually this will only be when debugging is enabled
-                save_fits(out, self.view, capture_exposure, self.guide)
+                save_fits(out, self.view, data, metadata)
 
                 # TODO do the guiding calculations here and send corrections
 
@@ -171,11 +173,12 @@ class Menu:
         w = surface.get_width()
         h = surface.get_height()
 
+        # this is a bit of a hack to reuse the view, guiding needs its own view
         self.view = View(w, h)
 
         if not guide:
             self.guide = None
-            self.view.no_signal()
+            self.view.message("no guide camera")
             self.menu = None
             return
 
@@ -185,7 +188,7 @@ class Menu:
         self.menu = luddcam_settings.mk_menu("Guide")
         self.menu_active = False
 
-        # FIXME add menu to enable calibration and start the guiding
+        # TODO add menu to enable calibration and start the guiding
 
     def cancel(self):
         if self.guide:

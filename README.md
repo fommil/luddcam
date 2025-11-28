@@ -1,12 +1,10 @@
 **LuddCam** is a minimalist astrophotography control system. Designed for a Raspberry Pi with a screen and controller, it brings the feel of a classic DSLR to your astrocamera.
 
-Modern astrophotography software often tries to automate everything: target acquisition, autofocus, flat frames, guiding, meridian flips, live stacking... and before you know it, the telescope is doing all the work, and you're just a remote spectator from your living room. LuddCam goes the other way. It requires you to be physically present: polar aligning through a scope, focusing, framing your shot, checking your histograms, pressing the shutter, waiting patiently to see how it comes out. It's not about convenience or performance, it's about connection.
+Modern astrophotography software often tries to automate everything: go-to, framing, autofocus, flat frames, guiding, meridian flips, live stacking... and before you know it, the telescope is doing all the work, and you're just a remote spectator from your living room. LuddCam goes the other way. It requires you to be physically present: polar aligning through a scope, focusing, framing your shot, checking your histograms, pressing the shutter, waiting patiently to see how it comes out. It's not about convenience or performance, it's about connection.
 
 LuddCam supports a few carefully chosen "cheat codes", like electronic filter wheels, guiding, and plate solving. But they are there as helpers, not crutches. Astrophotographers are encouraged to star hop to their targets (following printed star charts) instead of using go-to, use their mount's manual tracking or periodic error correction (PEC) whenever exposure and focal lengths allow it, and to manually change filters. The luddite way is to minimise the amount of technology used for any given picture, but the main objective is to be present, under the stars. LuddCam is open to integrating with any hardware, but draws the line at remote connections.
 
 Whether you're a DIY tinker-photographer, an analog romantic, or just someone who enjoys feeling the click of a real button under a dark sky, LuddCam is for you.
-
-**NOTE: I never managed to get this to an MVP, I've had to pause my workdue to an otherwise busy schedule, but I hope to come back to it within the next year or so.**
 
 # LuddScore
 
@@ -16,7 +14,7 @@ Start with a score of 10 and deduct a point for every one of the following that 
 
 - any kind of wireless connection
 - computer assisted polar alignment
-- GOTO to find the target
+- go-to find the target
 - plate solving to find the target
 - using a guide camera
 - automated flat panels
@@ -29,9 +27,9 @@ and be proud to share that score in your pictures, no matter what it is. There's
 
 # Hardware
 
-Caveat: LuddCam currently only works with ZWO cameras and filter wheels, with ST4 mounts, because that's all I have access to. If you really want something else you can try asking nicely but you will have to do some beta testing as I'm sure it won't work out first time.
+Caveat: LuddCam currently only works with ZWO / Touptek cameras, ZWO filter wheels, ST4 guided mounts, because that's all I have access to. If you really want something else you can try asking nicely but you will have to do some beta testing as I'm sure it won't work out first time. My exact hardware is: ASI120, ASI220, ASI1600mm, ASI585(mc/mm), G3M715C, EFWmini.
 
-It is possible to run LuddCam on a laptop, but that somewhat defeats the point. It is really designed to run on a Raspberry Pi. You can use a Model 4B or anything more recent.
+It is possible to run LuddCam on a laptop, but that somewhat defeats the point. It is really designed to run on a Raspberry Pi. You can use a Model 4b or anything more recent.
 
 Beyond the [Raspberry Pi 4B with 4GB+](https://thepihut.com/products/raspberry-pi-starter-kit?variant=20336446079038), I recommend the [WaveShare 4.3" LCD screen](https://thepihut.com/products/4-3-dsi-capacitive-touchscreen-display-for-raspberry-pi-800x480) ([the Amazon version includes a case](https://www.amazon.co.uk/dp/B09B29T8YF)) and [NES gamepad](https://thepihut.com/products/nes-style-raspberry-pi-compatible-usb-gamepad-controller). In total this should be just over $100.
 
@@ -56,16 +54,31 @@ Installation is currently a bit tricky, but I'm working on making it a single cl
 - frame the shot ✅
 - define filter intervals ✅
 - store exposures in FITS ✅
-- store guiding calibration and exposures
-- all views have info overlays
+- testing framework ✅
+- all views have info overlays ✅
 
 ## Beta
 
-- auto guiding
-- burst / planetary capture with RoI
+- calibration frames
 - playback
+- guiding
+
+## Gamma
+
+- plate solving
+- polar alignment
+- planetary
 
 # Version 2
 
-For version 2 I want to optimise the code (which may mean a rewrite in Rust) so that it can run on a Raspberry Pi Zero with a [GamePi13](https://thepihut.com/products/gamepi13-1-3-lcd-game-console-for-raspberry-pi-240-x240), plus a 3d printed case, with a total cost of under $50.
+For version 2 I want to focus on hardware.
 
+I want to optimise the code (which may mean a rewrite in Rust) so that it can run on a Raspberry Pi Zero 2 with a [GamePi13](https://thepihut.com/products/gamepi13-1-3-lcd-game-console-for-raspberry-pi-240-x240), plus a 3d printed case, with a total cost of under $50.
+
+I also want to consider a self-contained variant that can attach onto the back of a planetary camera, with an external screen (mini hdmi) to check focus. This could then serve as a plug and play LuddGuide.
+
+An external touchscreen mini hdmi could also be an interesting variant for LuddCam. A self contained battery would enable uncooled cameras in a Hyperstar without any diffraction spikes.
+
+I'd like to experiment with e-ink screens, which should be much kinder on night vision than LED screens.
+
+I'm also interested in experimenting with a voice based interface (no screen!). That might also spawn off a screenless assistant for visual astronomy, e.g. "how do I get to Casseopia" followed by "left a bit, up a bit" responses.

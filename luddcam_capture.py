@@ -59,8 +59,13 @@ from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 import os
+import pathlib
 import re
+import shutil
+import subprocess
+import sys
 import threading
+import traceback
 import time
 
 import fitsio
@@ -71,6 +76,7 @@ import pygame_menu
 
 import luddcam_settings
 from luddcam_settings import is_left, is_right, is_up, is_down, is_menu, is_start, is_action, is_back, is_button
+import mocks
 
 ALIGN_LEFT=pygame_menu.locals.ALIGN_LEFT
 
@@ -103,7 +109,7 @@ class Capture:
         self.thread = threading.Thread(target=self.run, daemon=True, name="Capture")
 
         if output_dir:
-            pattern = re.compile(r"IMG_(\d+)\.fits$")
+            pattern = re.compile(r"IMG_(\d+)\.fit.*$")
             numbers = []
             for path in Path(self.output_dir).iterdir():
                 match = pattern.match(path.name)
@@ -113,25 +119,33 @@ class Capture:
 
     # Must be called by the UI thread to start the worker.
     def start(self):
-        with self.lock:
-            self.stage = Stage.LIVE
+        self.set_stage(Stage.LIVE)
         return self.thread.start()
 
     # Can be called by the UI thread to change the Mode of operation.
     def set_mode(self, mode):
         with self.lock:
-            # TODO should we force it to LIVE?
             self.mode = mode
             self.interval_idx = None
+            self.image_count = 0
+        self.view.message(f"{mode} selected")
 
     # Can be called by the UI thread to change the Stage of the lifecycle.
     #
     # Stop will block the caller until the thread completes.
     def set_stage(self, stage):
+        if stage is Stage.START and not self.output_dir:
+            self.view.message("drive not selected")
+            return
         with self.lock:
             self.stage = stage
-        if stage == Stage.STOP:
+            self.image_count = 0
+        if stage is Stage.STOP:
             self.thread.join()
+        if stage is Stage.START or stage is Stage.LIVE:
+            self.view.message("initialising")
+        if stage is Stage.PAUSE:
+            self.view.message("||", clear = False)
 
     # Can be called by the UI thread to inspect the current Stage.
     def get_stage(self):
@@ -148,33 +162,36 @@ class Capture:
         capture_exposure = None
         capture_slot = None
         capture_interval_idx = None
+        capture_start = None
+        capture_end = None
         last_stage = None
         last_mode = None
         while True:
-            time.sleep(0.1)
+            time.sleep(0.1 / mocks.warp)
             with self.lock:
                 # thread safe access
                 mode = self.mode
                 stage = self.stage
                 interval_idx = self.interval_idx
-            if last_stage != stage or last_mode != mode:
+                image_count = self.image_count
+            if last_stage is not stage or last_mode is not mode:
                 # TODO common state transition code (if LIVE is always forced
                 # we can drop last_mode)
                 pass
             last_stage = stage
             last_mode = mode
 
-            if stage == Stage.STOP:
+            if stage is Stage.STOP:
                 self.camera.capture_stop()
                 break
-            if stage == Stage.PAUSE:
+            if stage is Stage.PAUSE:
                 if capturing:
                     capturing = False
                     capture_stage = None
                     self.camera.capture_stop()
                     self.view.paused()
                 continue
-            if stage == Stage.LIVE:
+            if stage is Stage.LIVE:
                 if capturing and capture_stage is Stage.START:
                     capturing = False
                     capture_stage = None
@@ -185,7 +202,7 @@ class Capture:
                 capture_stage = stage
                 capture_mode = mode
 
-                if mode == Mode.INTERVALS:
+                if mode is Mode.INTERVALS:
                     intervals = self.camera_settings.intervals
                     if not interval_idx:
                         index, sub = (0, 0)
@@ -213,15 +230,34 @@ class Capture:
                         capture_slot = self.wheel_settings.default
                         self.wheel.set_slot_and_wait(capture_slot)
 
-                if stage == Stage.LIVE and capture_exposure > 1:
+                if stage is Stage.LIVE and capture_exposure > 1:
                     # intentionally limit live exposures
                     capture_exposure = 1
 
+                capture_start = time.monotonic()
+                # print(f"starting exposure with {capture_exposure} at {capture_start}")
+                # if capture_end:
+                #     print(f".... we waited {capture_start - capture_end:.2f} secs between captures")
                 self.camera.capture_start(capture_exposure)
                 capturing = True
+
+                if image_count == 0:
+                    if self.stage is Stage.LIVE:
+                        summary = f"LIVE ({capture_exposure}s)"
+                    elif self.mode is Mode.SINGLE:
+                        summary = f"SINGLE ({capture_exposure}s)"
+                    elif self.mode is Mode.REPEAT:
+                        summary = f"REPEAT ({capture_exposure}s)"
+                    else:
+                        summary = f"INTERVAL ({len(intervals)} steps)"
+                    self.view.message(summary)
+                with self.lock:
+                    self.image_count += 1
+
                 continue
 
             # TODO guard the capture_wait calls for exposures > 1 sec.
+            # print(f".... checking on exposure after {time.monotonic() - capture_start:.2f} secs")
 
             # we could guard this until it's nearer the time to expect an
             # exposure to be ready, if this impacts the camera negatively.
@@ -230,51 +266,55 @@ class Capture:
                 continue
             elif status is None:
                 capturing = False
-                print("capture failed")
-                self.view.no_signal()
+                # print("capture failed")
+                self.view.message("no signal")
                 continue
 
             capturing = False
-            print("capture complete")
+            capture_end = time.monotonic()
+            print(f"capture complete ({capture_end - capture_start:.2f} secs), now {capture_end}")
             data = self.camera.capture_finish()
-            if capture_stage == Stage.LIVE:
-                self.view.set_data(None, data)
-            elif not self.output_dir:
-                self.view.set_data(False, data)
+            assert(data is not None)
+            if capture_slot is None:
+                filt = None
             else:
-                out = f"{self.output_dir}/IMG_{self.seq:05}.fits"
+                filt = self.wheel_settings.filters[capture_slot] or f"Slot {capture_slot + 1}"
+            metadata = mk_metadata(capture_exposure, self.camera, filt, self.camera_settings.cooling)
+            # some extra info for the view, might go unused but it could be useful
+            metadata_ = metadata + [("MODE", mode), ("STAGE", stage), ("IMAGE_COUNT", image_count)]
+            if capture_stage is Stage.LIVE:
+                self.view.set_data(None, data, metadata_)
+            elif not self.output_dir:
+                self.view.set_data(False, data, metadata_)
+            else:
+                out = f"{self.output_dir}/IMG_{self.seq:05}.fit"
                 self.seq += 1
-                self.view.set_data(out, data)
+                self.view.set_data(out, data, metadata_)
 
-                if capture_mode == Mode.SINGLE:
+                if capture_mode is Mode.SINGLE:
                     # this allows the single image to stay on the screen until
                     # the user presses BACK to unpause or START to take another.
                     self.set_stage(Stage.PAUSE)
-                elif capture_mode == Mode.INTERVALS:
+                elif capture_mode is Mode.INTERVALS:
                     # this allows us to track where we got to and if we paused
                     # during this exposure, it'll restart at exactly this point.
                     with self.lock:
                         self.interval_idx = capture_interval_idx
 
-                if capture_slot is None:
-                    filt = None
-                else:
-                    filt = self.wheel_settings.filters[capture_slot] or f"Slot {capture_slot + 1}"
-
-                save_fits(out, self.view, capture_exposure, self.camera, filt, self.camera_settings.cooling)
+                save_fits(out, self.view, data, metadata)
 
         print(f"capture stopped for {self.camera.name}")
 
-def save_fits(out, view, exp, camera, filt = None, cooling = None):
-    print(f"...saving to {out}")
-
+def mk_metadata(exp, camera, filt = None, cooling = None):
     # note that fitsio seems to automatically set BZERO and BSCALE
     metadata = []
     metadata.append(("PROGRAM", "luddcam"))
+    # DATE is junk on raspberry pis without batteries
     metadata.append(("DATE", datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")))
     metadata.append(("EXPTIME", exp))
     if filt:
         metadata.append(("FILTER", filt))
+    metadata.append(("BITDEPTH", camera.bitdepth))
 
     metadata.append(("XPIXSZ", camera.pixelsize))
     metadata.append(("YPIXSZ", camera.pixelsize))
@@ -283,13 +323,16 @@ def save_fits(out, view, exp, camera, filt = None, cooling = None):
         metadata.append(("CCD-TEMP", temp))
     if camera.is_cooled and cooling is not None:
         metadata.append(("SET-TEMP", cooling))
-    if camera.gain != None:
+    if camera.gain is not None:
         metadata.append(("GAIN", camera.gain))
-    if camera.offset != None:
+    if camera.offset is not None:
         metadata.append(("OFFSET", camera.offset))
     if camera.bayer:
         metadata.append(("BAYERPAT", camera.bayer))
+    return metadata
 
+def save_fits(out, view, data, metadata):
+    print(f"...saving to {out}")
     writer = FitsWriter(view, data, out, metadata)
     writer.start()
 
@@ -312,22 +355,49 @@ class FitsWriter:
         self.thread.start()
 
     def run(self):
-        start = time.perf_counter()
-        with fitsio.FITS(self.out, "rw") as fits:
-            # rice encoding can be lossy for floating point
-            fits.write(self.data, compress="gzip1")
-            hdu = fits[-1]
-            for k, v in self.metadata:
-                hdu.write_key(k, v)
-        end = time.perf_counter()
-        elapsed = end - start
-        # we're using removable media, let's flush our writes
-        with open(self.out, "rb+") as f:
-            os.fsync(f.fileno())
-        print(f"FITS writing elapsed time: {elapsed:.4f} seconds")
-        if self.view:
-            self.view.saved(self.out, True)
-        # TODO when the write fails
+        try:
+            start = time.perf_counter()
+            with fitsio.FITS(self.out, "rw") as fits:
+                # note that rice encoding can be lossy for floating point
+                #
+                # compression is disabled here because it all happens inside the
+                # GIL which impacts the app responsivity (and the tests).
+                # https://github.com/esheldon/fitsio/issues/474
+                #
+                # we flip on write because fits starts at the bottom
+                # but the camera SDKs (and common image formats) start
+                # at the top.
+                fits.write(np.flipud(self.data), compress=None)
+                hdu = fits[-1]
+                for k, v in self.metadata:
+                    hdu.write_key(k, v)
+
+            # we're using removable media, so we want to flush our writes.
+            #
+            # Unfortunately, fsync holds the GIL, so we prefer a subprocess
+            # to ensure the file got written. This only works on linux, which is
+            # our target platform. Note that "sync -f" operates on
+            # the entire filesystem, not just the file, which can be costly
+            # in dev environments.
+
+            if have_fpack:
+                subprocess.run(["fpack", "-D", "-g1", self.out], check=True)
+                if sys.platform.startswith("linux"):
+                    subprocess.run(["sync", "-f", self.out + ".fz"])
+            else:
+                if sys.platform.startswith("linux"):
+                    subprocess.run(["sync", "-f", self.out])
+
+            end = time.perf_counter()
+            print(f"FITS writing elapsed time: {end - start:.4f} seconds")
+            if self.view:
+                self.view.saved(self.out, True)
+        except Exception as e:
+            # TODO should we try again?
+            print(f"Failed to write {self.out}")
+            traceback.print_exc()
+
+have_fpack = shutil.which("fpack") is not None
 
 # Capture, and its spawned FitsWriter, will update the surface asynchronously
 # (keyed by the file that identifies the capture). The main loop can call this
@@ -339,7 +409,6 @@ class View:
         self.target_width = width
         self.target_height = height
 
-        # only ever accessed on the UI thread
         self.surface = pygame.Surface((width, height))
         self.zoom = False
 
@@ -347,50 +416,62 @@ class View:
         self.lock = threading.Lock()
         self.out = None
         self.img_raw = None
-        self.img_rgb = None
+        self.stale = True
+        self.meta = None
+
+        self.font_large = pygame.font.Font(luddcam_settings.hack, 32)
+        self.font_small = pygame.font.Font(luddcam_settings.hack, 14)
 
     # Callable by the UI thread, enables or disables digital zoom.
     def toggle_zoom(self):
         with self.lock:
-            self.img_rgb = None
+            self.stale = True
             self.zoom = not self.zoom
 
     # thread safe way to write the surface out to the target, lazily
     # initialising all aspects of it (rendering is done on the calling thread).
     def blit(self, target):
+        self.render()
+        target.blit(self.surface, (0, 0))
+
+    def render(self):
+        # print(f"requested to render the image lazily...(zoom={self.zoom})")
         # grabs an atomic view of all the shared thread state
         with self.lock:
             out = self.out
             img_raw = self.img_raw
-            img_rgb = self.img_rgb
+            stale = self.stale
+            meta = self.meta
+            surface = self.surface
+            zoom = self.zoom
 
-        if img_raw is None:
-            # TODO placeholder "waiting for capture"
-            pass
-        elif img_rgb is None:
-            img_rgb = scale(img_raw, self.target_width, self.target_height, self.zoom)
-            pygame.surfarray.blit_array(self.surface, img_rgb)
-            # TODO stats and icons etc (input parameters)
+        if isinstance(img_raw, str):
+            if meta:
+                surface.fill((0, 0, 0))
+            text = self.font_large.render(img_raw, True, (255, 0, 0))
+            rect = text.get_rect(center=(surface.get_width()//2, surface.get_height()//2))
+            surface.blit(text, rect)
+        elif stale:
+            render_frame_for_screen(surface, img_raw, zoom, meta, out, self.font_small)
             with self.lock:
-                if img_raw is self.img_raw:
-                    self.img_rgb = img_rgb
+                self.stale = False
 
-        target.blit(self.surface, (0, 0))
-
-    def no_signal(self):
-        # TODO placeholder image "no signal from camera"
-        pass
+    def message(self, msg, clear = True):
+        if not clear:
+            self.render() # make sure we drew the thing!
+        self.set_data(None, msg, clear)
 
     # the data designated for the given file.
     #
     # If out is False it indicates that the output dir was not set, and an error
     # should be displayed on the image. If it is None it means the image will
     # not be updated any further (e.g. live).
-    def set_data(self, out, img_raw):
+    def set_data(self, out, img_raw, meta):
         with self.lock:
             self.out = out
             self.img_raw = img_raw
-            self.img_rgb = None
+            self.meta = dict(meta) if isinstance(meta, list) else meta
+            self.stale = True
 
     def paused(self):
         # TODO implement
@@ -402,6 +483,72 @@ class View:
         # with self.lock:
         pass
 
+# moved out for easier manual testing
+def render_frame_for_screen(surface, img_raw, zoom, meta, out, font):
+    target_width, target_height = surface.get_size()
+    #print(surface.get_size())
+    img_rgb = scale(img_raw, target_width, target_height, zoom, meta.get("BAYERPAT"))
+    #print(img_rgb.shape)
+
+    img_rgb = asinh_lut[img_rgb] # simple stretch
+    # pygame expects (w,h,3) but everything else is (h,w,3)
+    img_rgb = np.transpose(img_rgb, (1, 0, 2))
+
+    pygame.surfarray.blit_array(surface, img_rgb)
+
+    def tab(s):
+        if len(s) == 0:
+            return s
+        if not s.endswith(" "):
+            s += " "
+        tab = 4
+        need = (-len(s)) % tab
+        #print(f"adding {need} spaces to '{s}'")
+        return s + " " * need
+
+    def append_meta(s, key, prefix = "", suffix = "", align = True):
+        if (v := meta.get(key)):
+            if align:
+                s = tab(s)
+            # TODO could also render fractions
+            if isinstance(v, float) and v.is_integer():
+                v = str(int(v))
+            return s + prefix + str(v) + suffix
+        return s
+
+    # potentially skip the histogram in live view too
+    if not zoom:
+        if (bitdepth := meta.get("BITDEPTH")):
+            # TODO scale the histogram based on the screen width
+            hist, saturated = histogram(img_raw, 128, bitdepth)
+            render_histogram(surface, hist, 10, 10)
+
+        mode = meta["MODE"]
+        stage = meta["STAGE"]
+        top_left = ""
+        if out:
+            top_left = tab(top_left) + pathlib.Path(out).name.split(".")[0]
+
+        top_left = append_meta(top_left, "EXPTIME", suffix = "s")
+        top_left = append_meta(top_left, "GAIN", prefix=" ", suffix = "cB", align=False) # centibel = 0.1dB
+        top_left = append_meta(top_left, "FILTER", prefix=" ", align=False)
+
+        if stage == Stage.LIVE:
+            top_left = tab(top_left) + stage.name
+        else:
+            top_left = tab(top_left) + mode.name
+            if mode != Mode.SINGLE:
+                # TODO when in interval it should be c/step_total of step/steps_total
+                # instead of infinity.
+                top_left = append_meta(top_left, "IMAGE_COUNT", prefix=" ", suffix="/∞", align=False)
+
+        text = font.render(top_left, True, (255, 255, 255))
+        rect = text.get_rect()
+        rect.topleft = (10, 10)
+        surface.blit(text, rect)
+
+    # TODO more stats and icons
+
 class Menu:
     def __init__(self, output_dir, camera, camera_settings, wheel, wheel_settings):
         surface = pygame.display.get_surface()
@@ -411,8 +558,8 @@ class Menu:
         self.view = View(w, h)
         if not camera:
             self.capture = None
-            self.view.no_signal()
             self.menu = None
+            self.view.message("no camera")
             return
 
         self.capture = Capture(self.view, output_dir, camera, camera_settings, wheel, wheel_settings)
@@ -463,12 +610,13 @@ class Menu:
                 # we'll leave the active stage running
                 self.menu_active = True
             elif is_start(event):
-                if self.capture.get_stage() == Stage.START:
+                # print("SHUTTER")
+                if self.capture.get_stage() is Stage.START:
                     self.capture.set_stage(Stage.PAUSE)
                 else:
                     self.capture.set_stage(Stage.START)
             elif is_action(event):
-                print("TOGGLE ZOOM")
+                # print("TOGGLE ZOOM")
                 self.view.toggle_zoom()
             # TODO back should put LIVE into PAUSE, or we should have a method
             # called "defocus" or something that achieves the same thing. Then
@@ -477,39 +625,228 @@ class Menu:
 
         self.view.blit(screen)
 
-# TODO write some tests for the screen rendering, use DSLR fits files to test
-# rendering RGB data.
-
-# TODO support 8 bit mono and bayered RGB data
+# zoom means to crop to the target size
 #
-# zoom means to crop to the target rather than downscale.
-#
-# also, does this work if the target is larger than the original?
-def scale(mono, target_width, target_height, zoom):
+# TODO does this work if the target is larger than the original?
+def scale(mono, target_width, target_height, zoom, bayer):
     height, width = mono.shape
+    # print(f"START: width={width},height={height}")
+
+    # this can be surprisingly computationally expensive if we are not careful,
+    # so we aim for speed above quality.
+    #
+    # we first throw away data, as less data means less cpu, by cropping to the
+    # zoom region or to the aspect ratio.
+    #
+    # then we use a fast debayer (no interpolation) for osc or throw away every
+    # other row/column for mono.
+    #
+    # with what remains we scale the image evenly, and then quantise into 8
+    # bits. quantisation can be really slow if we do it too early. We use basic
+    # median / max values of the scaled images instead of using percentiles on
+    # the original, which gives us some protection against hot pixels.
+
+    # we always have to be mindful of resizing mono data to even numbers to
+    # preserve the bayer pattern.
+
+    # the nearest even, rounding up
+    def even_up(i):
+        return (i + 1) & ~1
+
+    # the nearest event, rounding down
+    def even_down(i):
+        return i & ~1
 
     if zoom:
-        startx = width//2 - target_width//2
-        starty = height//2 - target_height//2
-        print(f"rendering zoomed version ({startx}, {starty}, {target_width}, {target_height})")
-        img_ds = mono[starty:starty + target_height,startx:startx + target_width]
+        s = 2 if bayer else 1
+        startx = even_down(width // 2 - s * target_width // 2)
+        starty = even_down(height // 2 - s * target_height // 2)
+        mono = mono[starty:starty + s*target_height, startx:startx + s*target_width]
     else:
-        scale_w = width / target_width
-        scale_h = height / target_height
-        scale = min(scale_w, scale_h)
-        step = max(1, int(scale))
-        img_ds = mono[::step, ::step]
+        ar = width / height
+        target_ar = target_width / target_height
+        #print(f"we have {ar}, we aim for {target_ar}")
+        if ar < target_ar:
+            # like fitting VHS into widescreen, crop the height
+            new_height = even_up(int(width * target_ar))
+            #print(f"new_height={new_height}")
+            sy = even_down((height - new_height) // 2)
+            mono = mono[sy:sy + new_height, :]
+        elif target_ar < ar:
+            # like playing widescreen on VHS, crop the width
+            new_width = even_up(int(height * target_ar))
+            #print(f"new_width={new_width}")
+            sx = even_down((width - new_width) // 2)
+            mono = mono[:, sx:sx + new_width]
 
-    # TODO autostretch instead of dropping the lower bits
-    img_8bit = (img_ds >> 8).astype(np.uint8)
-    img_rgb = np.stack([img_8bit]*3, axis=-1)
-    img_rgb_t = np.transpose(img_rgb, (1, 0, 2))
+    height, width = mono.shape
+    #print(f"PRECROPPED: width={width},height={height}")
+    scale = width / target_width
+    step = max(1, int(scale))
+    #print(f"step = {step}")
 
-    # faster top-left crop
-    # return img_rgb_t[:target_width, :target_height, :]
+    # now debayer and downscale by slicing, then crop again
+    if bayer:
+        # three (rgb) channels
+        channels = debayer(mono, bayer)
+        height, width = channels.shape[:2]
+        #print(f"DEBAYERED: width={width},height={height}")
+        step = step // 2 # because we already downsampled
+        if step > 1:
+            channels = channels[::step, ::step, :]
+        height, width = channels.shape[:2]
+        #print(f"DOWNSCALED: width={width},height={height}")
+        sy = max(0, (height - target_height) // 2)
+        sx = max(0, (width - target_width) // 2)
+        channels = channels[sy:sy + target_height, sx:sx + target_width, :]
+    else:
+        # one mono channel
+        channels = mono
+        if step > 1:
+            channels = channels[::step, ::step]
+        height, width = channels.shape
+        sy = max(0, (height - target_height) // 2)
+        sx = max(0, (width - target_width) // 2)
+        channels = channels[sy:sy + target_height, sx:sx + target_width]
 
-    # center crop
-    w, h = img_rgb_t.shape[:2]
-    start_x = (w - target_width) // 2
-    start_y = (h - target_height) // 2
-    return img_rgb_t[start_x:start_x + target_width, start_y:start_y + target_height, :]
+    #print(f"CROPPED: width={width},height={height}")
+
+    def bits_low(i):
+        return 1 << (int(i).bit_length() - 1)
+    def bits_high(i):
+        return 1 << int(i).bit_length()
+
+    # now quantise to 8 bits
+    if channels.dtype == np.uint8:
+        channels_8 = channels
+    else:
+        sampled = channels[::8, ::8]
+        # clip below the noise level
+        lo = bits_low(np.median(sampled))
+        # and above the 99th percentile (saturation protection)
+        hi = bits_high(np.percentile(sampled, 99.9))
+        if lo < hi:
+            m = 255.0 / (hi - lo)
+            channels_8 = ((channels - lo) * m).clip(0, 255).astype(np.uint8)
+        else:
+            channels_8 = (channels >> 8).astype(np.uint8)
+
+    if bayer:
+        return channels_8
+    else:
+        return np.stack([channels_8] * 3, axis=-1)
+
+# debayer the mono image using the given pattern, using fast downsampling.
+#
+# debayering algorithms that aim for quality rather than performance keep the
+# original image size and fill in missing pixels by averaging in each channel.
+def debayer(data, bayer):
+    # print(f"debayering an {data.shape} image with {bayer} pattern")
+    h, w = data.shape
+    if h % 2 or w % 2:
+        raise ValueError(f"debayer_simple expects even dimensions (got {h},{w})")
+
+    dt = data.dtype
+
+    tl = data[0::2, 0::2]
+    tr = data[0::2, 1::2]
+    #bl = data[1::2, 0::2]
+    #br = data[1::2, 1::2]
+
+    # def avg(a, c):
+    #     return ((a.astype(np.uint16) + c.astype(np.uint16)) >> 1).astype(dt)
+
+    # pick one of the greens and throw the other away for perf
+    if bayer == "RGGB":
+        #R, G, B = tl, avg(tr, bl), br
+        br = data[1::2, 1::2]
+        R, G, B = tl, tr, br
+    elif bayer == "BGGR":
+        # R, G, B = br, avg(tr, bl), tl
+        br = data[1::2, 1::2]
+        R, G, B = br, tr, tl
+    elif bayer == "GRBG":
+        # R, G, B = tr, avg(tl, br), bl
+        bl = data[1::2, 0::2]
+        R, G, B = tr, tl, bl
+    elif bayer == "GBRG":
+        # R, G, B = bl, avg(tl, br), tr
+        bl = data[1::2, 0::2]
+        R, G, B = bl, tl, tr
+    else:
+        raise ValueError(f"Unsupported Bayer pattern: {pattern}")
+
+    return np.stack((R, G, B), axis=-1)
+
+def lut_asinh(k=10.0):
+    x = np.linspace(0, 1, 256)
+    y = np.arcsinh(k * x) / np.arcsinh(k)
+    return (y * 255).astype(np.uint8)
+
+asinh_lut = lut_asinh(15)
+
+# returns a tuple of normalised histogram weights and the absolute count of
+# saturated pixels. Log scale.
+def histogram(img_raw, bins, bitdepth):
+    max_val = 1 << bitdepth
+    data = img_raw.ravel()
+    data = data.clip(0, max_val - 1) # safety
+    # np.bincount is much faster than np.histogram
+    full = np.bincount(data, minlength=max_val)
+    factor = max_val // bins
+    hist = full.reshape(bins, factor).sum(axis=1)
+    saturated = hist[-1]
+    hist = np.log1p(hist)
+    if hist.max() > 0:
+        hist = hist / hist.max()
+    return hist, saturated
+
+def render_histogram(surface, hist,
+                     padding_right = 0, padding_bottom = 0,
+                     colour=(255,255,255)):
+    width = len(hist)
+    # print(width)
+    height = width // 2
+    s_w, s_h = surface.get_size()
+    base_w = s_w - padding_right - width
+    base_h = s_h - padding_bottom
+    # print(f"{s_w},{s_h},{base_w},{base_h}")
+
+    # TODO maybe we highlight the last bin somehow?
+    # but we can't assume the user has a colour screen
+    for x, v in enumerate(hist):
+        y = int(v * height)
+        c = colour
+        # if x == width - 1:
+        #     c = (255,0,255)
+        pygame.draw.line(surface, c, (base_w + x, base_h), (base_w + x, base_h - y))
+
+if __name__ == "__main__":
+    pygame.font.init()
+
+    f = "test_data/sony_a7iii/m31/exposures/10.fit.fz"
+    surface = pygame.Surface((800, 600))
+    img_raw = np.flipud(fitsio.FITS(f)[1].read())
+    zoom = False
+    meta = {
+        "BITDEPTH": 14,
+        "IMAGE_COUNT": 1,
+        "EXPTIME": 10.0,
+        "GAIN": 180.0,
+        "FILTER": "L",
+        "BAYERPAT": "RGGB",
+        "STAGE": Stage.START,
+        "MODE": Mode.REPEAT
+    }
+    out = "/foo/bar/IMG_00001.fits"
+    font = pygame.font.Font(luddcam_settings.hack, 14)
+
+    start = time.perf_counter()
+    render_frame_for_screen(surface, img_raw, zoom, meta, out, font)
+    end = time.perf_counter()
+    print(f"rendering took {end - start:.2f}")
+
+    pygame.image.save(surface, "test.png")
+    # Image.fromarray(out).save("test.png")
+
+    subprocess.Popen(["feh", "test.png"], start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

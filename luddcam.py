@@ -5,6 +5,8 @@ import os
 import pathlib
 import subprocess
 import sys
+import threading
+import time
 import traceback
 import warnings
 
@@ -12,10 +14,10 @@ import pygame
 import pygame_menu
 import pygame_menu.controls as ctrl
 
+import mocks
 import luddcam_settings
 import luddcam_capture
 import luddcam_guide
-import zwo
 
 from luddcam_settings import is_left, is_right, is_up, is_down, is_menu, is_start, is_action, is_back, is_button
 
@@ -23,7 +25,7 @@ ALIGN_LEFT=pygame_menu.locals.ALIGN_LEFT
 ALIGN_RIGHT=pygame_menu.locals.ALIGN_RIGHT
 
 APP_PATH = str(pathlib.Path(__file__).parent.resolve())
-FPS = 15
+FPS = 10
 
 # UX principals:
 #
@@ -64,6 +66,8 @@ class Mode(IntEnum):
     CAPTURE  = 3
     GUIDE    = 4
 
+ready = False
+
 def main():
     pygame.display.init()
     pygame.font.init()
@@ -103,15 +107,25 @@ def main():
     choose_menu.add.button("Capture", action=lambda: push(Mode.CAPTURE), align=ALIGN_LEFT)
     choose_menu.add.button("Guide", action=lambda: push(Mode.GUIDE), align=ALIGN_LEFT)
 
+    global ready
+    ready = True
+
     while True:
         events = pygame.event.get()
         for event in events:
+            # print(f"DEBUG: received event {event}")
             if event.type in [pygame.JOYDEVICEADDED, pygame.JOYDEVICEREMOVED]:
                 enable_joystick()
             elif event.type == pygame.QUIT:
                 print("asked to QUIT")
-                pygame.quit()
-                sys.exit()
+                if capture_menu:
+                    capture_menu.cancel()
+                if guide_menu:
+                    guide_menu.cancel()
+                # this can hang, so do it in the background
+                quitter = threading.Thread(target=pygame.quit, daemon=True, name="quit")
+                quitter.start()
+                return
             elif mode == Mode.BLANK and is_button(event):
                 print("waking screen")
                 pop()
@@ -165,6 +179,7 @@ def main():
 if __name__ == '__main__':
     try:
         main()
+        time.sleep(1) # or we never exit
     except Exception as e:
         print(f"Failed to run the main: {e}")
         traceback.print_exc()
