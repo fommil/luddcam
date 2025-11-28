@@ -68,6 +68,7 @@ import threading
 import traceback
 import time
 
+import PIL.Image as Image
 import fitsio
 import numpy as np
 import pygame
@@ -145,7 +146,9 @@ class Capture:
         if stage is Stage.START or stage is Stage.LIVE:
             self.view.message("initialising")
         if stage is Stage.PAUSE:
-            self.view.message("||", clear = False)
+            # FIXME after pausing we should go back into LIVE mode
+            #       maybe the user input should just do that
+            self.view.message("pausing")
 
     # Can be called by the UI thread to inspect the current Stage.
     def get_stage(self):
@@ -272,7 +275,7 @@ class Capture:
 
             capturing = False
             capture_end = time.monotonic()
-            print(f"capture complete ({capture_end - capture_start:.2f} secs), now {capture_end}")
+            # print(f"capture complete ({capture_end - capture_start:.2f} secs), now {capture_end}")
             data = self.camera.capture_finish()
             assert(data is not None)
             if capture_slot is None:
@@ -328,7 +331,10 @@ def mk_metadata(exp, camera, filt = None, cooling = None):
     if camera.offset is not None:
         metadata.append(("OFFSET", camera.offset))
     if camera.bayer:
-        metadata.append(("BAYERPAT", camera.bayer))
+        # fits files flip the vertical vs camera ordering,
+        # so the bayer needs to be flipped as well.
+        bayer = camera.bayer[2:4] + camera.bayer[0:2]
+        metadata.append(("BAYERPAT", bayer))
     return metadata
 
 def save_fits(out, view, data, metadata):
@@ -382,10 +388,10 @@ class FitsWriter:
 
             if have_fpack:
                 subprocess.run(["fpack", "-D", "-g1", self.out], check=True)
-                if sys.platform.startswith("linux"):
+                if sys.platform.startswith("linux") and not mocks.test_mode:
                     subprocess.run(["sync", "-f", self.out + ".fz"])
             else:
-                if sys.platform.startswith("linux"):
+                if sys.platform.startswith("linux") and not mocks.test_mode:
                     subprocess.run(["sync", "-f", self.out])
 
             end = time.perf_counter()
@@ -409,10 +415,12 @@ class View:
         self.target_width = width
         self.target_height = height
 
+        # only ever accessed from the UI thread
         self.surface = pygame.Surface((width, height))
         self.zoom = False
 
         # shared thread variables that must be accessed with a lock
+        # this is mostly for visibility, rather than avoiiing races
         self.lock = threading.Lock()
         self.out = None
         self.img_raw = None
@@ -446,8 +454,7 @@ class View:
             zoom = self.zoom
 
         if isinstance(img_raw, str):
-            if meta:
-                surface.fill((0, 0, 0))
+            surface.fill((0, 0, 0))
             text = self.font_large.render(img_raw, True, (255, 0, 0))
             rect = text.get_rect(center=(surface.get_width()//2, surface.get_height()//2))
             surface.blit(text, rect)
@@ -456,10 +463,8 @@ class View:
             with self.lock:
                 self.stale = False
 
-    def message(self, msg, clear = True):
-        if not clear:
-            self.render() # make sure we drew the thing!
-        self.set_data(None, msg, clear)
+    def message(self, msg):
+        self.set_data(None, msg, None)
 
     # the data designated for the given file.
     #
@@ -470,7 +475,7 @@ class View:
         with self.lock:
             self.out = out
             self.img_raw = img_raw
-            self.meta = dict(meta) if isinstance(meta, list) else meta
+            self.meta = dict(meta) if meta else None
             self.stale = True
 
     def paused(self):
@@ -487,12 +492,19 @@ class View:
 def render_frame_for_screen(surface, img_raw, zoom, meta, out, font):
     target_width, target_height = surface.get_size()
     #print(surface.get_size())
-    img_rgb = scale(img_raw, target_width, target_height, zoom, meta.get("BAYERPAT"))
+    start = time.perf_counter()
+    img_rgb = downscale(img_raw, target_width, target_height, zoom, meta.get("BAYERPAT"))
+    end = time.perf_counter()
+    #print(f"scaling for the screen took {end - start:.2f}")
     #print(img_rgb.shape)
 
+    # TODO add a heuristic to decide if it makes sense to stretch
+    #      (allows terrestrial use)
     img_rgb = asinh_lut[img_rgb] # simple stretch
     # pygame expects (w,h,3) but everything else is (h,w,3)
     img_rgb = np.transpose(img_rgb, (1, 0, 2))
+    # and it's also upside down compared to the rest of the world
+    #img_rgb = img_rgb[::-1, ::-1, :]
 
     pygame.surfarray.blit_array(surface, img_rgb)
 
@@ -522,6 +534,8 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font):
             # TODO scale the histogram based on the screen width
             hist, saturated = histogram(img_raw, 128, bitdepth)
             render_histogram(surface, hist, 10, 10)
+
+        # FIXME add count of saturated pixels
 
         mode = meta["MODE"]
         stage = meta["STAGE"]
@@ -616,6 +630,7 @@ class Menu:
                 else:
                     self.capture.set_stage(Stage.START)
             elif is_action(event):
+                # FIXME zoom and unzoom should work after a SINGLE capture
                 # print("TOGGLE ZOOM")
                 self.view.toggle_zoom()
             # TODO back should put LIVE into PAUSE, or we should have a method
@@ -626,115 +641,166 @@ class Menu:
         self.view.blit(screen)
 
 # zoom means to crop to the target size
-#
-# TODO does this work if the target is larger than the original?
-def scale(mono, target_width, target_height, zoom, bayer):
+def downscale(mono, target_width, target_height, zoom, bayer):
     height, width = mono.shape
-    # print(f"START: width={width},height={height}")
+    if target_height > height or target_width > width:
+        raise ValueError(f"downscale doesn't upscale ({mono.shape} => ({h},{w}))")
+
+    #print(f"START: {mono.shape}")
 
     # this can be surprisingly computationally expensive if we are not careful,
     # so we aim for speed above quality.
     #
-    # we first throw away data, as less data means less cpu, by cropping to the
-    # zoom region or to the aspect ratio.
+    # we first throw away as much data as possible by cropping to the zoom
+    # region or downsampling and then padding to the aspect ratio.
     #
-    # then we use a fast debayer (no interpolation) for osc or throw away every
-    # other row/column for mono.
+    # then we use a fast debayer (no interpolation) for osc.
     #
     # with what remains we scale the image evenly, and then quantise into 8
     # bits. quantisation can be really slow if we do it too early. We use basic
     # median / max values of the scaled images instead of using percentiles on
     # the original, which gives us some protection against hot pixels.
-
+    #
     # we always have to be mindful of resizing mono data to even numbers to
     # preserve the bayer pattern.
 
-    # the nearest even, rounding up
-    def even_up(i):
-        return (i + 1) & ~1
-
-    # the nearest event, rounding down
-    def even_down(i):
-        return i & ~1
-
+    s = 2 if bayer else 1
     if zoom:
-        s = 2 if bayer else 1
+        height, width = mono.shape
         startx = even_down(width // 2 - s * target_width // 2)
         starty = even_down(height // 2 - s * target_height // 2)
         mono = mono[starty:starty + s*target_height, startx:startx + s*target_width]
+        #print(f"DOWNSAMPLE: image is now {mono.shape}")
     else:
-        ar = width / height
-        target_ar = target_width / target_height
-        #print(f"we have {ar}, we aim for {target_ar}")
-        if ar < target_ar:
-            # like fitting VHS into widescreen, crop the height
-            new_height = even_up(int(width * target_ar))
-            #print(f"new_height={new_height}")
-            sy = even_down((height - new_height) // 2)
-            mono = mono[sy:sy + new_height, :]
-        elif target_ar < ar:
-            # like playing widescreen on VHS, crop the width
-            new_width = even_up(int(height * target_ar))
-            #print(f"new_width={new_width}")
-            sx = even_down((width - new_width) // 2)
-            mono = mono[:, sx:sx + new_width]
+        mono = down_sample_mono(mono, bayer, target_width, target_height)
+        #print(f"DOWNSAMPLE: image is now {mono.shape}")
+        mono = pad_to_aspect(mono, bayer, target_width, target_height)
+        #print(f"LETTERBOX: image is now {mono.shape}")
 
-    height, width = mono.shape
-    #print(f"PRECROPPED: width={width},height={height}")
-    scale = width / target_width
-    step = max(1, int(scale))
-    #print(f"step = {step}")
+    #print(f"CROPPED: {mono.shape}")
 
     # now debayer and downscale by slicing, then crop again
     if bayer:
-        # three (rgb) channels
         channels = debayer(mono, bayer)
-        height, width = channels.shape[:2]
-        #print(f"DEBAYERED: width={width},height={height}")
-        step = step // 2 # because we already downsampled
-        if step > 1:
-            channels = channels[::step, ::step, :]
-        height, width = channels.shape[:2]
-        #print(f"DOWNSCALED: width={width},height={height}")
-        sy = max(0, (height - target_height) // 2)
-        sx = max(0, (width - target_width) // 2)
-        channels = channels[sy:sy + target_height, sx:sx + target_width, :]
+        print(f"BEBAYERED: {channels.shape}")
     else:
-        # one mono channel
         channels = mono
-        if step > 1:
-            channels = channels[::step, ::step]
-        height, width = channels.shape
-        sy = max(0, (height - target_height) // 2)
-        sx = max(0, (width - target_width) // 2)
-        channels = channels[sy:sy + target_height, sx:sx + target_width]
-
-    #print(f"CROPPED: width={width},height={height}")
-
-    def bits_low(i):
-        return 1 << (int(i).bit_length() - 1)
-    def bits_high(i):
-        return 1 << int(i).bit_length()
 
     # now quantise to 8 bits
     if channels.dtype == np.uint8:
         channels_8 = channels
     else:
-        sampled = channels[::8, ::8]
-        # clip below the noise level
-        lo = bits_low(np.median(sampled))
-        # and above the 99th percentile (saturation protection)
-        hi = bits_high(np.percentile(sampled, 99.9))
+        # start = time.perf_counter()
+        sampled = channels[::2, ::2] # speeds things up
+        sampled = sampled[sampled > 0] # ignores letterboxing
+        # faster ways to calculate bounds, more generic
+        #lo = np.min(sampled)
+        #hi = np.max(sampled)
+        # astro specific, and a bit slower, but prettier
+        lo = np.median(sampled) # astro specific noise level
+        hi = np.percentile(sampled, 99.9) # guaranteed saturation
+        # end = time.perf_counter()
+        # print(f"finding the quantization parameters took {end - start:.2f} ")
+        print(f"lo={lo},hi={hi}")
         if lo < hi:
             m = 255.0 / (hi - lo)
-            channels_8 = ((channels - lo) * m).clip(0, 255).astype(np.uint8)
+            # we need to go to 32 bit to handle negative values.
+            #
+            # we tould do something like apply a mask to channels to remove the
+            # values that would wrap around and avoid recreating.
+            channels_8 = ((channels.astype(np.int32) - lo) * m).clip(0, 255).astype(np.uint8)
         else:
             channels_8 = (channels >> 8).astype(np.uint8)
+
+    #channels_8 = resize_nn(channels_8, target_width, target_height)
+    channels_8 = resize_nn_pillow(channels_8, target_width, target_height)
+    # print(f"RESIZED: {channels_8.shape}")
 
     if bayer:
         return channels_8
     else:
         return np.stack([channels_8] * 3, axis=-1)
+
+# the nearest even, rounding up
+def even_up(i):
+    return (i + 1) & ~1
+
+# the nearest event, rounding down
+def even_down(i):
+    return i & ~1
+
+# nearest neighbour numpy image resize, pretty shitty
+def resize_nn(img, tw, th):
+    h, w = img.shape[:2]
+    scale_x = w / tw
+    scale_y = h / th
+    # map dest pixel centers back to src pixel centers
+    xs = ((np.arange(tw) + 0.5) * scale_x - 0.5).astype(int)
+    ys = ((np.arange(th) + 0.5) * scale_y - 0.5).astype(int)
+    xs = np.clip(xs, 0, w - 1)
+    ys = np.clip(ys, 0, h - 1)
+    return img[ys[:, None], xs[None, :]]
+
+def resize_nn_pillow(img, tw, th):
+    pil = Image.fromarray(img)
+    resized = pil.resize((tw, th), Image.NEAREST)
+    return np.array(resized, dtype=img.dtype)
+
+def crop_to_aspect(mono, bayer, target_width, target_height):
+    height, width = mono.shape
+    ar = width / height
+    target_ar = target_width / target_height
+    #print(f"we have {ar}, we aim for {target_ar}")
+    if ar < target_ar:
+        # like fitting VHS into widescreen, crop the height
+        new_height = even_up(int(width * target_ar))
+        sy = even_down((height - new_height) // 2)
+        mono = mono[sy:sy + new_height, :]
+    elif target_ar < ar:
+        # like playing widescreen on VHS, crop the width
+        new_width = even_up(int(height * target_ar))
+        sx = even_down((width - new_width) // 2)
+        mono = mono[:, sx:sx + new_width]
+    return mono
+
+# lossless way to fit it into the screen. we have previously
+# cropped to aspect but it loses data. See below
+def pad_to_aspect(mono, bayer, target_width, target_height):
+    height, width = mono.shape
+    ar = width / height
+    target_ar = target_width / target_height
+
+    if ar < target_ar:
+        # like VHS into widescreen, add padding left/right
+        new_width = even_up(int(width * target_ar))
+        pad = (new_width - width) // 2
+        print(f"rescaling {ar} to {target_ar} with {pad} padding")
+        mono = np.pad(mono, ((0, 0), (pad, pad)), mode="constant")
+    elif ar > target_ar:
+        # like widescreen on CRT, letterbox add padding top/bottom
+        new_height = even_up(int(height * target_ar))
+        pad = (new_height - height) // 2
+        print(f"rescaling {ar} to {target_ar} with {pad} padding")
+        mono = np.pad(mono, ((pad, pad), (0, 0)), mode="constant")
+
+    return mono
+
+# given a target size this will throw away entire rows and columns
+# to get into the right ballpark, retaining bayer cells.
+def down_sample_mono(mono, bayer, target_width, target_height):
+    height, width = mono.shape
+    if width >= target_width and height >= target_height:
+        step = min(width // (target_width), height // (target_height))
+        if not bayer and step >= 2:
+            mono = mono[::step, ::step]
+        elif bayer and step >= 4:
+            step = step // 2
+            print(f"downsampling bayered image by {step}")
+            blk = mono.reshape(height // 2, 2, width // 2, 2)
+            blk = blk[::step, :, ::step, :]
+            ys, _, xs, _ = blk.shape
+            mono = blk.reshape(ys * 2, xs * 2)
+    return mono
 
 # debayer the mono image using the given pattern, using fast downsampling.
 #
@@ -778,7 +844,7 @@ def debayer(data, bayer):
 
     return np.stack((R, G, B), axis=-1)
 
-def lut_asinh(k=10.0):
+def lut_asinh(k):
     x = np.linspace(0, 1, 256)
     y = np.arcsinh(k * x) / np.arcsinh(k)
     return (y * 255).astype(np.uint8)
@@ -824,9 +890,25 @@ def render_histogram(surface, hist,
 if __name__ == "__main__":
     pygame.font.init()
 
-    f = "test_data/sony_a7iii/m31/exposures/10.fit.fz"
+    # 3 minute dual band exposure
+    # f = "test_data/sony_a7iii/m31/exposures/10.fit.fz"
+    # actually a 30 second rgb exposure
+    f = "test_data/sony_a7iii/m31/exposures/1.fit.fz"
+    # sony a7iii is RGGB, so GBRG when reading from flipped fits
+    bayer = "GBRG"
+    #bayer = None
+
+    # a picture of a tree
+    #f = "tmp/IMG_00030.fit.fz"
+    # G3M715C is GRBG, so BGGR when reading from flipped fits
+    # bayer = "BGGR"
+    # bayer = "GRBG"
+    # ASI585MC is GBRG, so RGGB when reading from flipped fits
+    # bayer = "RGGB"
+
     surface = pygame.Surface((800, 600))
     img_raw = np.flipud(fitsio.FITS(f)[1].read())
+
     zoom = False
     meta = {
         "BITDEPTH": 14,
@@ -834,7 +916,12 @@ if __name__ == "__main__":
         "EXPTIME": 10.0,
         "GAIN": 180.0,
         "FILTER": "L",
-        "BAYERPAT": "RGGB",
+        # sony a7iii is RGGB, so GBRG when reading from flipped fits
+        "BAYERPAT": bayer,
+        # G3M715C is GRBG, so BGGR when reading from flipped fits
+        # "BAYERPAT": "BGGR",
+        # ASI585MC is GBRG, so RGGB when reading from flipped fits
+        # "BAYERPAT": "RGGB",
         "STAGE": Stage.START,
         "MODE": Mode.REPEAT
     }

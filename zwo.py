@@ -421,7 +421,7 @@ class Camera:
             self.offset = v
 
     def capture_start(self, exposure):
-        print(f"capture_start for exposure={exposure}")
+        #print(f"capture_start for exposure={exposure}")
 
         # safety
         call(self.lib.ASIStopExposure(self.i))

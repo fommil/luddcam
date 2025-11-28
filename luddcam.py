@@ -105,7 +105,7 @@ def main():
     choose_menu = luddcam_settings.mk_menu("Choose Mode")
     choose_menu.add.vertical_margin(10)
     choose_menu.add.button("Capture", action=lambda: push(Mode.CAPTURE), align=ALIGN_LEFT)
-    choose_menu.add.button("Guide", action=lambda: push(Mode.GUIDE), align=ALIGN_LEFT)
+    # choose_menu.add.button("Guide", action=lambda: push(Mode.GUIDE), align=ALIGN_LEFT)
 
     global ready
     ready = True
@@ -141,18 +141,20 @@ def main():
                     settings_menu.camera_settings(),
                     settings_menu.wheel,
                     settings_menu.wheel_settings())
-                guide_menu = luddcam_guide.Menu(
-                    settings_menu.output_dir(),
-                    settings_menu.guide
-                )
+                # guide_menu = luddcam_guide.Menu(
+                #     settings_menu.output_dir(),
+                #     settings_menu.guide
+                # )
                 pop()
             elif mode > Mode.SETTINGS and is_menu(event):
                 print("entering settings")
                 # TODO warning / ack about ending capture sessions
                 #
                 # TODO preserve capture mode
-                capture_menu.cancel()
-                guide_menu.cancel()
+                if capture_menu:
+                    capture_menu.cancel()
+                if guide_menu:
+                    guide_menu.cancel()
                 push(Mode.SETTINGS)
             elif mode > Mode.CHOOSE and is_back(event):
                 print("showing submenu choice")

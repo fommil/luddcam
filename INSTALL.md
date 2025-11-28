@@ -1,5 +1,9 @@
 # Installation
 
+# FIXME convert this entire file into a Makefile entry
+# FIXME bundle the libasi
+# FIXME bundle pygame_menu
+
 Hopefully this will be one-click when I package it up as a `.deb` file.
 
 # Dependencies

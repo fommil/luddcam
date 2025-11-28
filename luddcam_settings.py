@@ -552,6 +552,8 @@ class Menu:
         default_frames = FRAME_OPTIONS.index(new_entry.frames)
         default_filter = 0
 
+        # FIXME add quick access buttons for bias (fastest) and flat (1 sec) exposures
+
         def select_exposure(a, b):
             if not initialized:
                 return

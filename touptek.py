@@ -53,6 +53,10 @@ class Camera:
         self.c = toupcam.Toupcam.Open(dev.id)
         self.bitdepth = self.c.MaxBitDepth()
 
+        # in terms of flipping it is best to use the SDK defaults
+        # as sometimes it is to correct effectively a hardware mistake
+        # self.c.put_HFlip(False)
+        # self.c.put_VFlip(False)
         self.c.put_AutoExpoEnable(False)
         self.c.put_Option(toupcam.TOUPCAM_OPTION_RAW, 1)
         self.c.put_Option(toupcam.TOUPCAM_OPTION_BITDEPTH, 1)
@@ -115,7 +119,7 @@ class Camera:
             self.img = None
 
     def capture_start(self, exposure):
-        print(f"touptek capture_start for exposure={exposure}")
+        # print(f"touptek capture_start for exposure={exposure}")
         self.img = False
         v = int(exposure * 1_000_000) # us
         self.c.put_ExpoTime(v)

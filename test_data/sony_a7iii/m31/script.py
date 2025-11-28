@@ -70,15 +70,14 @@ a()
 start()
 nothing(1)
 snap("capture_intervals_started")
-nothing(10)
+nothing(11)
 # first capture
 snap("capture_intervals_first")
-# screen off
-up()
+up() # screen off
 nothing(1)
 snap("capture_intervals_screen_off")
 nothing(10)
-start()
+start() # pause even when screen off
 nothing(1)
 snap("capture_intervals_done")
 
