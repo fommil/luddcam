@@ -285,7 +285,6 @@ class Menu:
         # can allow guide cameras to appear in the main camera list. If we
         # have only a guide camera attached, preference is given to guiding
         # although it can be unselected and moved.
-
         guides = [a for a in self.guides if a != self.camera]
         if guides:
             guides.append(none_selected)
@@ -294,6 +293,11 @@ class Menu:
             else:
                 default_guide = 0
             set_guide(guides[default_guide])
+
+        # FIXME there's a bug here where if the user starts up the app having
+        # previously selected a camera (that could be used as guide scope) then
+        # it can be selected as a guide without first deselecting it as primary
+        # and everything breaks.
 
         cameras = [a for a in self.cameras] + [a for a in self.guides if a != self.guide]
         if cameras:
@@ -834,7 +838,7 @@ def exposure_render(i):
         if minutes == 1:
             return "1 min"
         return f"{minutes} mins"
-    frac = Fraction(i).limit_denominator(10000)
+    frac = Fraction(i).limit_denominator(100000)
     if frac <= 1:
         return f"{frac} sec"
     return f"{frac} secs"

@@ -57,6 +57,7 @@
 
 from datetime import datetime, timezone
 from enum import Enum
+from fractions import Fraction
 from pathlib import Path
 import os
 import pathlib
@@ -334,11 +335,13 @@ def mk_metadata(exp, camera, filt = None, cooling = None):
         # fits files flip the vertical vs camera ordering,
         # so the bayer needs to be flipped as well.
         bayer = camera.bayer[2:4] + camera.bayer[0:2]
+        # print(f"camera bayer is {camera.bayer}, flipped is {bayer}")
+        metadata.append(("SENSORBP", camera.bayer))
         metadata.append(("BAYERPAT", bayer))
     return metadata
 
 def save_fits(out, view, data, metadata):
-    print(f"...saving to {out}")
+    # print(f"...saving to {out}")
     writer = FitsWriter(view, data, out, metadata)
     writer.start()
 
@@ -395,7 +398,7 @@ class FitsWriter:
                     subprocess.run(["sync", "-f", self.out])
 
             end = time.perf_counter()
-            print(f"FITS writing elapsed time: {end - start:.4f} seconds")
+            print(f"FITS.write: {end - start:.4f} {self.out}")
             if self.view:
                 self.view.saved(self.out, True)
         except Exception as e:
@@ -493,14 +496,20 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font):
     target_width, target_height = surface.get_size()
     #print(surface.get_size())
     start = time.perf_counter()
-    img_rgb = downscale(img_raw, target_width, target_height, zoom, meta.get("BAYERPAT"))
+    bayer = meta.get("SENSORBP") or meta.get("BAYERPAT")
+    img_rgb = downscale(img_raw, target_width, target_height, zoom, bayer)
     end = time.perf_counter()
     #print(f"scaling for the screen took {end - start:.2f}")
     #print(img_rgb.shape)
 
-    # TODO add a heuristic to decide if it makes sense to stretch
-    #      (allows terrestrial use)
-    img_rgb = asinh_lut[img_rgb] # simple stretch
+    # we calculate the full histogram later, but this quick approximation
+    # is basically free and handles colour / zoom / fov.
+
+    if meta["EXPTIME"] >= 0.1:
+        # simple stretch for astro exposures
+        # (allows terrestrial use, e.g. daytime setup)
+        # print("stretching")
+        img_rgb = asinh_lut[img_rgb]
     # pygame expects (w,h,3) but everything else is (h,w,3)
     img_rgb = np.transpose(img_rgb, (1, 0, 2))
     # and it's also upside down compared to the rest of the world
@@ -522,9 +531,12 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font):
         if (v := meta.get(key)):
             if align:
                 s = tab(s)
-            # TODO could also render fractions
-            if isinstance(v, float) and v.is_integer():
-                v = str(int(v))
+            if isinstance(v, float):
+                if v.is_integer():
+                    v = str(int(v))
+                else:
+                    frac = Fraction(v).limit_denominator(100000)
+                    v = f"{frac.numerator}/{frac.denominator}"
             return s + prefix + str(v) + suffix
         return s
 
@@ -540,6 +552,7 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font):
         mode = meta["MODE"]
         stage = meta["STAGE"]
         top_left = ""
+        bottom_left = ""
         if out:
             top_left = tab(top_left) + pathlib.Path(out).name.split(".")[0]
 
@@ -548,6 +561,8 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font):
         top_left = append_meta(top_left, "FILTER", prefix=" ", align=False)
 
         if stage == Stage.LIVE:
+            # TODO when it is live we should include info about the stage
+            # in the bottom left.
             top_left = tab(top_left) + stage.name
         else:
             top_left = tab(top_left) + mode.name
@@ -556,12 +571,12 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font):
                 # instead of infinity.
                 top_left = append_meta(top_left, "IMAGE_COUNT", prefix=" ", suffix="/∞", align=False)
 
-        text = font.render(top_left, True, (255, 255, 255))
-        rect = text.get_rect()
-        rect.topleft = (10, 10)
-        surface.blit(text, rect)
+        top_left_text = font.render(top_left, True, (255, 255, 255))
+        top_left_rect = top_left_text.get_rect()
+        top_left_rect.topleft = (10, 10)
+        surface.blit(top_left_text, top_left_rect)
 
-    # TODO more stats and icons
+        # TODO more stats and icons
 
 class Menu:
     def __init__(self, output_dir, camera, camera_settings, wheel, wheel_settings):
@@ -682,7 +697,7 @@ def downscale(mono, target_width, target_height, zoom, bayer):
     # now debayer and downscale by slicing, then crop again
     if bayer:
         channels = debayer(mono, bayer)
-        print(f"BEBAYERED: {channels.shape}")
+        # print(f"BEBAYERED: {channels.shape}")
     else:
         channels = mono
 
@@ -701,7 +716,7 @@ def downscale(mono, target_width, target_height, zoom, bayer):
         hi = np.percentile(sampled, 99.9) # guaranteed saturation
         # end = time.perf_counter()
         # print(f"finding the quantization parameters took {end - start:.2f} ")
-        print(f"lo={lo},hi={hi}")
+        # print(f"lo={lo},hi={hi}")
         if lo < hi:
             m = 255.0 / (hi - lo)
             # we need to go to 32 bit to handle negative values.
@@ -774,13 +789,13 @@ def pad_to_aspect(mono, bayer, target_width, target_height):
         # like VHS into widescreen, add padding left/right
         new_width = even_up(int(width * target_ar))
         pad = (new_width - width) // 2
-        print(f"rescaling {ar} to {target_ar} with {pad} padding")
+        # print(f"rescaling {ar} to {target_ar} with {pad} padding")
         mono = np.pad(mono, ((0, 0), (pad, pad)), mode="constant")
     elif ar > target_ar:
         # like widescreen on CRT, letterbox add padding top/bottom
         new_height = even_up(int(height * target_ar))
         pad = (new_height - height) // 2
-        print(f"rescaling {ar} to {target_ar} with {pad} padding")
+        # print(f"rescaling {ar} to {target_ar} with {pad} padding")
         mono = np.pad(mono, ((pad, pad), (0, 0)), mode="constant")
 
     return mono
@@ -795,7 +810,7 @@ def down_sample_mono(mono, bayer, target_width, target_height):
             mono = mono[::step, ::step]
         elif bayer and step >= 4:
             step = step // 2
-            print(f"downsampling bayered image by {step}")
+            # print(f"downsampling bayered image by {step}")
             blk = mono.reshape(height // 2, 2, width // 2, 2)
             blk = blk[::step, :, ::step, :]
             ys, _, xs, _ = blk.shape
@@ -890,38 +905,37 @@ def render_histogram(surface, hist,
 if __name__ == "__main__":
     pygame.font.init()
 
+    exp = 10.0
     # 3 minute dual band exposure
     # f = "test_data/sony_a7iii/m31/exposures/10.fit.fz"
     # actually a 30 second rgb exposure
-    f = "test_data/sony_a7iii/m31/exposures/1.fit.fz"
-    # sony a7iii is RGGB, so GBRG when reading from flipped fits
-    bayer = "GBRG"
+    # f = "test_data/sony_a7iii/m31/exposures/1.fit.fz"
+    # sony a7iii is RGGB
+    # bayer = "GBRG"
     #bayer = None
 
     # a picture of a tree
-    #f = "tmp/IMG_00030.fit.fz"
-    # G3M715C is GRBG, so BGGR when reading from flipped fits
-    # bayer = "BGGR"
+    f = "tmp/IMG_00007.fit.fz"
+    # G3M715C is GRBG
     # bayer = "GRBG"
-    # ASI585MC is GBRG, so RGGB when reading from flipped fits
-    # bayer = "RGGB"
+    # ASI585MC is RGGB
+    bayer = "RGGB"
+    exp = 0.001
 
     surface = pygame.Surface((800, 600))
+    # flipping a fits image has the impact of getting us back to sensor
+    # coordinates (zero is top left). But it also flips the bayer
+    # pattern back to the sensor pattern, not what is in the fits.
     img_raw = np.flipud(fitsio.FITS(f)[1].read())
 
     zoom = False
     meta = {
         "BITDEPTH": 14,
         "IMAGE_COUNT": 1,
-        "EXPTIME": 10.0,
+        "EXPTIME": exp,
         "GAIN": 180.0,
         "FILTER": "L",
-        # sony a7iii is RGGB, so GBRG when reading from flipped fits
-        "BAYERPAT": bayer,
-        # G3M715C is GRBG, so BGGR when reading from flipped fits
-        # "BAYERPAT": "BGGR",
-        # ASI585MC is GBRG, so RGGB when reading from flipped fits
-        # "BAYERPAT": "RGGB",
+        "SENSORBP": bayer,
         "STAGE": Stage.START,
         "MODE": Mode.REPEAT
     }

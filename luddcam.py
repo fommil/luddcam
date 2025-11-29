@@ -43,6 +43,10 @@ def enable_joystick():
         joystick = pygame.joystick.Joystick(0)
         print(f"using joystick {joystick.get_name()}")
         if joystick.get_name() == "USB gamepad":
+            # TODO might want to read these from a database, or ensure the user
+            #      has the latest. Check this with a SNES controller as I think
+            #      it might be the right way around by default.
+
             # change the default keys to match the NES controller, which seems
             # to have them the wrong way around. Apparent SELECT=2 and START=3.
             ctrl.JOY_BUTTON_SELECT = 1 # A
