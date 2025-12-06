@@ -1,0 +1,11 @@
+[Unit]
+Description=LuddCam
+After=default.target
+
+[Service]
+WorkingDirectory=PWD
+ExecStart=/bin/bash -c "devmon > ../devmon.log 2>&1 & exec ./luddcam.sh > ../luddcam.log 2>&1"
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,23 @@
+# adapted from https://github.com/indilib/indi-3rdparty/blob/master/libasi/99-asi.rules
+
+ACTION=="add", ATTR{idVendor}=="03c3", RUN+="/bin/sh -c '/bin/echo 1024 >/sys/module/usbcore/parameters/usbfs_memory_mb'"
+
+# All ASI Cameras and filter wheels
+SUBSYSTEMS=="usb", ATTR{idVendor}=="03c3", MODE="0666"
+
+# Set permissions for USB bind/unbind operations
+SUBSYSTEM=="module", KERNEL=="usb", ATTR{drivers_autoprobe}=="*", MODE="0666"
+SUBSYSTEM=="usb", DRIVER=="usb", RUN+="/bin/chmod 666 /sys/bus/usb/drivers/usb/bind /sys/bus/usb/drivers/usb/unbind"
+
+# Set permissions for USB power management
+# For ASI device power control
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="03c3", MODE="0666", RUN+="/bin/sh -c 'chmod 666 /sys$devpath/power/level'"
+
+# For parent hub power control
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="03c3", MODE="0666", RUN+="/bin/sh -c 'chmod 666 /sys$devpath/../power/level'"
+
+# access EFWmini through a system libusb
+#KERNEL=="hidraw*", ATTRS{idVendor}=="03c3", MODE="0666", TAG+="uaccess"
+
+# from efw/lib/efw.rules 
+ACTION=="add", ATTRS{idVendor}=="03c3", ATTRS{idProduct}=="1f01", GROUP="users", MODE="0666"

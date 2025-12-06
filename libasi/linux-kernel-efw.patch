@@ -1,0 +1,11 @@
+--- drivers/hid/usbhid/hid-core.c.orig	2025-12-08 13:15:08.657917762 +0000
++++ drivers/hid/usbhid/hid-core.c	2025-12-08 13:16:24.293959487 +0000
+@@ -1015,7 +1015,7 @@
+ 			      (hdesc->bNumDescriptors - 1) * sizeof(*hcdesc)) {
+ 		dbg_hid("hid descriptor invalid, bLen=%hhu bNum=%hhu\n",
+ 			hdesc->bLength, hdesc->bNumDescriptors);
+-		return -EINVAL;
++		// return -EINVAL;
+ 	}
+ 
+ 	hid->version = le16_to_cpu(hdesc->bcdHID);

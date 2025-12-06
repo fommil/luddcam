@@ -1,0 +1,8 @@
+/data/
+/tmp/
+failures/
+output/
+Pipfile.lock
+__pycache__/
+luddcam-settings.json*
+/test.png
