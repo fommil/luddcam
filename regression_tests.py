@@ -140,10 +140,10 @@ if __name__ == '__main__':
 
     os.makedirs(f"test_data/{mocks.test_mode}/assertions", exist_ok=True)
 
-    shutil.rmtree(mocks.output_dir())
+    shutil.rmtree(mocks.output_dir(), ignore_errors=True)
     os.makedirs(mocks.output_dir())
 
-    shutil.rmtree(f"test_data/{mocks.test_mode}/failures")
+    shutil.rmtree(f"test_data/{mocks.test_mode}/failures", ignore_errors=True)
     os.makedirs(f"test_data/{mocks.test_mode}/failures")
 
     threading.Thread(target=run, daemon=True, name="Test").start()
@@ -157,5 +157,5 @@ if __name__ == '__main__':
     time.sleep(1) # or we never exit
 
 # Local Variables:
-# compile-command: "./luddcam.sh regression_tests"
+# compile-command: "./luddcam.sh test"
 # End:

@@ -51,11 +51,11 @@ case "${1:-}" in
         ;;
     test)
         if [ "${2:-}" = "-force" ] ; then
-            rm luddcam-settings.json
+            rm -f luddcam-settings.json || true
         fi
-        python3 regression_tests.py | grep -v DETECT_AVX2
+        exec python3 regression_tests.py | grep -v DETECT_AVX2
         ;;
     *)
-        python3 luddcam.py
+        exec python3 luddcam.py
         ;;
 esac

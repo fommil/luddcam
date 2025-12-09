@@ -8,19 +8,50 @@ Whether you're a DIY tinker-photographer, an analog romantic, or just someone wh
 
 If you want to take the best picture possible, and squeeze every ounce of performance out of your gear, get an [ASIAIR](https://www.zwoastro.com/product-category/asiair/), [StellaVita](https://www.touptekastro.com/en-eu/products/stellavita), [StellarMate](https://stellarmate.com/) or a laptop with [SharpCap](https://www.sharpcap.co.uk/), [NINA](https://nighttime-imaging.eu/) and [PHD2](https://openphdguiding.org/).
 
-# Luddite Score
+# User Guide
 
-You can avoid comparing yourself with unatainable god-like images on astrobin by calculating your Luddite Score.
+LuddCam is designed to look and feel like a DSLR. The expected input is a retro NES controller and the controls are designed to be consistent between all modes:
 
-Start with a score of 10 and deduct a point for every electric motor that you use in a new context, e.g. align, slew, rotate, track, guide, change filters, or focus.
+- `START` is the shutter
+- `SELECT` is the menu
+- `A` is the primary action
+- `B` is the secondary action
 
-Many things can use two motors! And if you use the same motor for different things, you have to count it twice, e.g. star and polar alignment (2), goto slew (2), tracking (1) and guiding (2) costs 7 points in total.
+When LuddCam starts up, it drops into the menu allowing selection of the camera (or filter wheel if you have one)
 
-An exception is made for people with gear that doesn't have physical knobs for a motor, in which case manual movements are allowed but only if the motor moves only when you are physically pressing the button.
+<p align="center"><img src="./test_data/sony_a7iii/m31/assertions/settings_1.png" width="30%"></p>
 
-The perfect Luddite Score is only possible with a [barn door star tracker](https://www.youtube.com/watch?v=P_qqLA0WKJg), or manually controlling the worm gears on an equatorial mount throughout the entire session! The purists say you should be using film: they can start with a score of 11. Cavemen drawing with rocks can start with 12.
+The direction buttons work as expected with up/down to select a menu entry and left/right to change it. Left/right is used to go through all the menus, e.g. to change the exposure length (with quick buttons for bias/flats/dso) and gain
 
-Be proud to share your score in a project, no matter what it is. There's really no wrong answer so long as you enjoyed it!
+<p align="center"><img src="./test_data/sony_a7iii/m31/assertions/settings_3.png" width="30%"></p>
+
+or to label the filter wheel positions and create interval plans.
+
+When finished with the menu, press `SELECT` to go to the capture view, which will be `LIVE` by default (capped to a few seconds maximum exposure). To return to the menu at any moment, press `SELECT`.
+
+<p align="center"><img src="./test_data/sony_a7iii/m31/assertions/live_capture.png" width="30%"></p>
+
+ `A` can be used to zoom in to the central region which is excellent for focussing or mount star alignment.
+
+<p align="center"><img src="./test_data/sony_a7iii/m31/assertions/live_zoom.png" width="30%"></p>
+
+To take a single shot, press `START` (the shutter). It will remain on the screen until you press `A`, going back to `LIVE` mode or `START` to take another capture.
+
+Some useful information is shown on screen such as your exposure, file name, gain and position in the sequence. The preview is automatically stretched with arcsinh to make it easier to frame the shot.
+
+<p align="center"><img src="./test_data/sony_a7iii/m31/assertions/capture_repeat_done.png" width="30%"></p>
+
+Histograms are calculated across all the raw image pixels in their full bit depth. Also included is a count of saturated pixels (your hot pixels forever haunting you). Single shot mode is a great way to make sure you've dialled in your exposure lengths and gain.
+
+Once you're ready to start your session, press `LEFT` to get a choice of `SINGLE` / `REPEAT` / `INTERVAL` modes.
+
+All files are saved as (uncompressed) fits files and are flushed to disk, so once it says `SAVED` on the screen, even a dead battery won't ruin your night. A DSLR style naming convention is used so that processing follows your standard workflow and all the fits headers you'd expect to see are there.
+
+Once you've started the session, every image will appear on the screen as it is captured. To turn off the screen and save both your night vision and your batteries, press the `UP` button. Any button will wake the screen again, but it's best to use `UP` just to be consistent. Note that going to the menu while a capture is in-flight will cancel it.
+
+To pause a repeating capture session, press the shutter `START`.
+
+`B`, `DOWN` and `RIGHT` are reserved for future use.
 
 # Hardware
 
@@ -37,11 +68,15 @@ I've found that after physically attaching the LCD screen the following entry in
 dtoverlay=vc4-kms-dsi-waveshare-panel,4_3_inch
 ```
 
-Another option is the [Waveshare Game HAT](https://www.amazon.co.uk/dp/B07G57BC3R) which has less screen resolution but has integrated controls, and can run off a battery. However, it's not very weather resistant, so may need a custom 3d case to lock it down a bit further.
+Unfortunately the backlight cannot be turned off entirely, but we try to dim it as much as possible. I think this might be the biggest contributor to power usage; I'm able to get about 3 hours on a planetary camera taking 10 second exposures with a 5amp / 120g usb power bank, and almost 12 hours with a larger 20amp / 250g bank.
+
+Another option is the [Waveshare Game HAT](https://www.amazon.co.uk/dp/B07G57BC3R) which has less screen resolution but has integrated controls, and can run off a battery (although it won't last very long). However, it's not very weather resistant, so may need a custom 3d case to lock it down a bit further.
 
 # Installation
 
-Download [the latest release](https://github.com/fommil/luddcam/releases) "Source code (tar.gz)" and type
+This assumes that you already have a Raspberry Pi 4b (or higher) that is relatively up to date.
+
+Download [the latest release](https://github.com/fommil/luddcam/releases) "Source code (tar.gz)" to your raspberry pi and type
 
 ```
 tar xf luddcam-*.tar.gz
@@ -49,7 +84,7 @@ cd luddcam
 ./luddcam.sh install
 ```
 
-which will need network access to install dependencies. Then, on the pi, run these commands so that it boots up into the console instead of the default graphical interface.
+which will need network access to install dependencies (but is not needed thereafter). Then (again, on the pi) run these commands so that it boots up into the console instead of the default graphical interface.
 
 ```
 sudo raspi-config
@@ -96,3 +131,17 @@ For version 2 I want to focus on hardware. There's a few directions I want to ex
 2. Cost: running on the smaller a [Raspberry Pi Zero 2](https://www.raspberrypi.com/products/raspberry-pi-zero-2-w/), possibly with a [GamePi13](https://thepihut.com/products/gamepi13-1-3-lcd-game-console-for-raspberry-pi-240-x240), could get the cost to less than $50.
 3. Size: if power consumption can be optimised, and casings made small enough, it might be possible to have something that could control a RASA / HyperStar without  diffraction spikes. That could involve an [external display](https://thepihut.com/products/m5papers3-esp32s3-development-kit-with-4-7-eink-display-960-x-540).
 4. Voice: a microphone and speaker could mean replacing the controller and screen, e.g. "how do I get to Casseopia?" followed by "left a bit, up a bit" responses. Or a plug-and-play standalone autoguider.
+
+# Luddite Score
+
+You can avoid comparing yourself with unatainable god-like images on astrobin by calculating your Luddite Score.
+
+Start with a score of 10 and deduct a point for every electric motor that you use in a new context, e.g. align, slew, rotate, track, guide, change filters, or focus.
+
+Many things can use two motors! And if you use the same motor for different things, you have to count it twice, e.g. star and polar alignment (2), goto slew (2), tracking (1) and guiding (2) costs 7 points in total.
+
+An exception is made for people with gear that doesn't have physical knobs for a motor, in which case manual movements are allowed but only if the motor moves only when you are physically pressing the button.
+
+The perfect Luddite Score is only possible with a [barn door star tracker](https://www.youtube.com/watch?v=P_qqLA0WKJg), or manually controlling the worm gears on an equatorial mount throughout the entire session! The purists say you should be using film: they can start with a score of 11. Cavemen drawing with rocks can start with 12.
+
+Be proud to share your score in a project, no matter what it is. There's really no wrong answer so long as you enjoyed it!

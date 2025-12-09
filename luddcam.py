@@ -71,6 +71,27 @@ class Mode(IntEnum):
 
 ready = threading.Event()
 
+BACKLIGHT_DIR = "/sys/class/backlight"
+def backlight_off(base=BACKLIGHT_DIR):
+    if not os.path.isdir(base):
+        return
+    for dev in os.listdir(base):
+        path = os.path.join(base, dev, "brightness")
+        if os.path.exists(path):
+            with open(path, "w") as f:
+                f.write(str(0))
+
+def backlight_on(base=BACKLIGHT_DIR):
+    for dev in os.listdir(base):
+        path = os.path.join(base, dev, "brightness")
+        path_m = os.path.join(base, dev, "max_brightness")
+        max_brightness = 255
+        if os.path.exists(path_m):
+            max_brightness = int(open(path).read())
+        if os.path.exists(path):
+            with open(path, "w") as f:
+                f.write(str(max_brightness))
+
 def main():
     pygame.display.init()
     pygame.font.init()
@@ -131,9 +152,12 @@ def main():
             elif mode == Mode.BLANK and is_button(event):
                 print("waking screen")
                 pop()
+                backlight_on()
             elif mode > Mode.CHOOSE and is_up(event):
                 print("blanking screen")
                 push(Mode.BLANK)
+                surface.fill((0, 0, 0))
+                backlight_off()
             elif mode == Mode.SETTINGS and is_menu(event):
                 print("exiting settings")
                 settings_menu.save()
@@ -163,9 +187,7 @@ def main():
                 print("exiting choice")
                 pop()
 
-        if mode == Mode.BLANK:
-            surface.fill((0, 0, 0))
-        elif mode == Mode.SETTINGS:
+        if mode == Mode.SETTINGS:
             settings_menu.update(events)
         elif mode == Mode.CHOOSE:
             choose_menu.update(events)

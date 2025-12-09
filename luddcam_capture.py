@@ -136,7 +136,7 @@ class Capture:
             self.mode = mode
             self.interval_idx = None
             self.image_count = 0
-        self.view.message(f"{mode} selected")
+        self.view.message(f"{mode.name} selected")
 
     # Can be called by the UI thread to change the Stage of the lifecycle.
     #
@@ -174,6 +174,7 @@ class Capture:
         capture_interval_idx = None
         capture_start = None
         capture_end = None
+        capture_target = None
         last_stage = None
         last_mode = None
         while True:
@@ -247,6 +248,10 @@ class Capture:
                 # print(f"starting exposure with {capture_exposure} at {capture_start}")
                 # if capture_end:
                 #     print(f".... we waited {capture_start - capture_end:.2f} secs between captures")
+
+                # we could reuse capturing here but it's cleaner to introduce a separate variable
+                capture_target = time.monotonic() + capture_exposure / mocks.warp
+
                 self.camera.capture_start(capture_exposure)
                 capturing = True
 
@@ -265,10 +270,17 @@ class Capture:
 
                 continue
 
-            # TODO guard the capture_wait calls for exposures > 1 sec.
-            # print(f".... checking on exposure after {time.monotonic() - capture_start:.2f} secs")
+            # to help save on battery we just park it here. This means reaction
+            # time (e.g. if the user asks to cancel) will be compromised but so
+            # long as we don't go crazy it's ok. It's also good to ping the
+            # camera regularly to ensure no part of the connection sleeps.
+            if capture_target:
+                remaining = (capture_target - time.monotonic() - 0.1)
+                if remaining > 0:
+                    park = min(5 / mocks.warp, remaining)
+                    # print(f"PARKING for {park}")
+                    time.sleep(park)
 
-            # we could guard this until it's nearer the time to expect an
             # exposure to be ready, if this impacts the camera negatively.
             status = self.camera.capture_wait()
             if status is False:
@@ -478,7 +490,7 @@ class View:
         if isinstance(img_raw, str) or img_raw is None:
             surface.fill((0, 0, 0))
             if img_raw:
-                text = self.font_large.render(img_raw, True, (255, 0, 0))
+                text = self.font_large.render(img_raw, True, (255, 255, 255))
                 rect = text.get_rect(center=(surface.get_width()//2, surface.get_height()//2))
                 surface.blit(text, rect)
         else:

@@ -286,7 +286,8 @@ class Menu:
         # although it can be unselected and moved.
         #
         # Note that self.camera and self.guide are not initially set.
-        guides = [a for a in self.guides if a.name != self.settings.camera]
+        # TODO guide selection is disabled until the beta
+        guides = [] # [a for a in self.guides if a.name != self.settings.camera]
         if guides:
             guides.append(none_selected)
             if self.settings.guide:
@@ -322,8 +323,8 @@ class Menu:
                 align=ALIGN_LEFT)
 
         if not guides:
-            button = menu.add.button("Guide: none", align=ALIGN_LEFT)
-            button.update_font({"color": (100, 100, 100)})
+            #button = menu.add.button("Guide: none", align=ALIGN_LEFT)
+            #button.update_font({"color": (100, 100, 100)})
             set_guide(none_selected)
         else:
             def select_guide(a, guide):
