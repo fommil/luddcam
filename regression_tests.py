@@ -59,7 +59,7 @@ def expect_images(n, retries=10):
         return expect_images(n, retries=retries-1)
     assert got == n, f"expected {n} fits files, got {got}"
 
-def snap(name, tolerance=10, retries=10):
+def snap(name, tolerance=10, retries=5):
     f = f"test_data/{mocks.test_mode}/assertions/{name}.png"
     current = pygame.display.get_surface().copy()
 
@@ -80,6 +80,7 @@ def snap(name, tolerance=10, retries=10):
 
             diffs = surface_with_diff(current, ref, tolerance)
             fff = f"test_data/{mocks.test_mode}/failures/{name}_diffs.png"
+            # unfortunately this saves the most recent one, so can be fiddly
             pygame.image.save(diffs, fff)
             subprocess.Popen(["feh", fff], start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             raise AssertionError(f"image mismatch {f}: max diff {diff:.2f}")

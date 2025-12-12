@@ -27,11 +27,6 @@ up(3)
 snap("settings_4_set")
 
 select() # close settings, go to live view
-
-# TODO make some assertions about the settings file
-
-# use larger tolerances on the image grabs here because
-# of non-determinism from which light frame
 snap("live_started")
 nothing(3)
 snap("live_capture")
@@ -47,8 +42,7 @@ snap("capture_single_done")
 expect_images(1)
 
 # goes back to live
-# (this may change to zoom in the future)
-a()
+b()
 nothing(2)
 snap("live_again")
 
@@ -63,6 +57,11 @@ start()
 snap("capture_repeat_done")
 # this can be bit flakey because the exposure is short
 expect_images(5)
+
+# now try the zoom feature
+a()
+nothing(2)
+snap("live_zoom_again")
 
 # swap to intervals, 10 second exposures
 left()
@@ -86,5 +85,5 @@ expect_images(7)
 # TODO assert on the data and metadata of the output fits
 
 # Local Variables:
-# compile-command: "cd ../../../ ; ./luddcam.sh regression_tests"
+# compile-command: "cd ../../../ ; ./luddcam.sh test"
 # End:

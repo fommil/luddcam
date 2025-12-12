@@ -1,47 +1,10 @@
 # The live / capture mode. When this mode is selected a Thread is spawned which
 # continually updates (with minimum/maximum exposures) a buffer that is
 # (optionally) displayed on the pygame surface by the main UI thread, and/or
-# writes to disk. Threads are fine here because the C calls won't block the GIL
-# and there's not much CPU work.
+# writes to disk.
 #
 # This file contains both the exposure thread, and the code (that runs on the
 # main UI thread) to produce the menu.
-#
-# The following icons are overlaid to give some indication of status:
-#
-# - media
-# - mode
-# - filter / gain
-# - temp
-# - guiding
-#
-# with a histogram and pixel saturation count (except for live).
-#
-# If there is no primary camera selected, this should show a stock image like an
-# X that fills the screen. It should be blank if we are waiting on the first
-# capture. If there have been 3 failures in a row, a more concerning stock image
-# should be shown, e.g. a warning sign in the middle.
-#
-# SELECT and BACK work as normal (goes to settings menu / modal choice).
-#
-# LEFT lets the user choose between single shot, continuous (i.e. intervals
-# using the single shot settings), or intervals (defined in settings). A sets
-# the value and returns to the LIVE view.
-#
-# A zooms in, and pressing it again returns to the live view. This only impacts
-# the view, it doesn't impact what is saved to disk. An icon is shown to
-# indicate that it is zoomed in. In the future we may have a preview of the
-# zoomed region, different zoom levels, and directional pad to move the region
-# of interest (especially in preparation for planetary capture).
-#
-# If the media is available, START takes pictures, saves to disk, then previews
-# the latest image on the screen along with a histogram and some basic stats
-# (e.g. count of pixels with maximum values). This happens in a loop in interval
-# mode. START while a capture is in-progress should cancel a single or
-# continuous shot, allowing picking up where left off in intervals.
-#
-# When viewing the last picture in single shot mode, A returns to LIVE and START
-# will take another.
 #
 # A design choice is that the settings are only accessible through the SELECT
 # menu, we're not providing sub-menus. This keeps everything nice and simple.
@@ -75,7 +38,7 @@ import pygame
 import pygame_menu
 
 import luddcam_settings
-from luddcam_settings import is_left, is_right, is_up, is_down, is_start, is_action, is_button
+from luddcam_settings import is_back, is_left, is_right, is_up, is_down, is_start, is_action, is_button
 import mocks
 
 ALIGN_LEFT=pygame_menu.locals.ALIGN_LEFT
@@ -463,6 +426,14 @@ class View:
         with self.lock:
             self.stale = True
             self.zoom = not self.zoom
+            return self.zoom
+
+    def disable_zoom(self):
+        with self.lock:
+            if self.zoom:
+                self.stale = True
+            self.zoom = False
+            return self.zoom
 
     # thread safe way to write the surface out to the target, lazily
     # initialising all aspects of it (rendering is done on the calling thread).
@@ -632,6 +603,7 @@ class Menu:
         h = surface.get_height()
 
         self.view = View(w, h)
+        self.zoom = False # used to capture BACK
         if not camera:
             self.capture = None
             self.menu = None
@@ -659,6 +631,9 @@ class Menu:
             default=0,
             onchange=select_mode,
             align=ALIGN_LEFT)
+
+    def handling_back(self):
+        return self.zoom or self.capture.get_stage() == Stage.PAUSE
 
     def cancel(self):
         if self.capture:
@@ -693,19 +668,19 @@ class Menu:
                     self.capture.set_stage(Stage.PAUSE)
                 else:
                     self.capture.set_stage(Stage.CAPTURE)
-            elif is_action(event):
+                self.zoom = self.view.disable_zoom()
+            elif is_back(event):
                 if stage == Stage.PAUSE:
-                    # we've ran out of buttons, allowing zoom here would have
-                    # been nice but we'll have to require playback for that.
                     self.capture.set_stage(Stage.LIVE)
-                else:
-                    # TODO zoom should be changed to a two stage process: first
-                    # click shows a box, arrows move around, second click goes in
-                    # (arrows still work). The settings should persist per camera.
-                    # we need a way to either reset or (preferred) visually
-                    # highlight that we're dead on center, maybe by showing a faded
-                    # version of the center view.
-                    self.view.toggle_zoom()
+                    self.zoom = self.view.disable_zoom()
+            elif is_action(event):
+                # TODO zoom should be changed to a two stage process: first
+                # click shows a box, arrows move around, second click goes in
+                # (arrows still work). The settings should persist per camera.
+                # we need a way to either reset or (preferred) visually
+                # highlight that we're dead on center, maybe by showing a faded
+                # version of the center view.
+                self.zoom = self.view.toggle_zoom()
 
         self.view.blit(screen)
 

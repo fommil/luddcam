@@ -35,7 +35,7 @@ When finished with the menu, press `SELECT` to go to the capture view, which wil
 
 <p align="center"><img src="./test_data/sony_a7iii/m31/assertions/live_zoom.png" width="30%"></p>
 
-To take a single shot, press `START` (the shutter). It will remain on the screen until you press `A`, going back to `LIVE` mode or `START` to take another capture.
+To take a single shot, press `START` (the shutter). It will remain on the screen until you press `B`, going back to `LIVE` mode, `A` to zoom, or `START` to take another capture.
 
 Some useful information is shown on screen such as your exposure, file name, gain and position in the sequence. The preview is automatically stretched with arcsinh to make it easier to frame the shot.
 
