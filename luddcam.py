@@ -180,17 +180,6 @@ def main():
                 if guide_menu:
                     guide_menu.cancel()
                 push(Mode.SETTINGS)
-            elif is_back(event):
-                if mode > Mode.CHOOSE:
-                    # only act on the BACK if the mode isn't handling it.
-                    if mode == Mode.CAPTURE and capture_menu.handling_back():
-                        pass
-                    else:
-                        print("showing submenu choice")
-                        push(Mode.CHOOSE)
-                elif mode == Mode.CHOOSE:
-                    print("exiting choice")
-                    pop()
 
         if mode == Mode.SETTINGS:
             settings_menu.update(events)

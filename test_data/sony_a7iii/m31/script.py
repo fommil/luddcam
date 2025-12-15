@@ -47,7 +47,7 @@ nothing(2)
 snap("live_again")
 
 # selects REPEAT mode
-left()
+b()
 right()
 a()
 start() # 2 second exposures
@@ -61,12 +61,13 @@ expect_images(5)
 # now try the zoom feature
 a()
 nothing(2)
-snap("live_zoom_again")
+snap("capture_paused_zoom")
 
 # swap to intervals, 10 second exposures
-left()
+b() # exit zoom, back to live
+b() # enters mode selector
 right()
-a()
+b() # alt way of exiting selector
 
 start()
 snap("capture_intervals_started")

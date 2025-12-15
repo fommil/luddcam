@@ -41,9 +41,9 @@ Some useful information is shown on screen such as your exposure, file name, gai
 
 <p align="center"><img src="./test_data/sony_a7iii/m31/assertions/capture_repeat_done.png" width="30%"></p>
 
-Histograms are calculated across all the raw image pixels in their full bit depth. Also included is a count of saturated pixels (your hot pixels forever haunting you). Single shot mode is a great way to make sure you've dialled in your exposure lengths and gain.
+Histograms use a logarithm scale and are calculated across all the raw image pixels in their full bit depth. Also included is a count of saturated pixels (your hot pixels forever haunting you). Single shot mode is a great way to make sure you've dialled in your exposure lengths and gain.
 
-Once you're ready to start your session, press `LEFT` to get a choice of `SINGLE` / `REPEAT` / `INTERVAL` modes.
+Once you're ready to start your session, press `B` to get back into `LIVE` mode, then `B` again to get a choice of `SINGLE` / `REPEAT` / `INTERVAL` modes.
 
 All files are saved as (uncompressed) fits files and are flushed to disk, so once it says `SAVED` on the screen, even a dead battery won't ruin your night. A DSLR style naming convention is used so that processing follows your standard workflow and all the fits headers you'd expect to see are there.
 

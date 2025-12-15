@@ -1,5 +1,7 @@
 Many thanks to ZWO's support team for this. Not many helpdesks would walk you through recompiling your linux kernel.
 
+This is tracked in https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=1122193
+
 If your EFW is not recognised in a recent (mostly Debian/Ubuntu flavoured) linux and `dmesg` shows a -22 error when you insert it, you may be able to get it to work again by reverting or rebuilding your kernel.
 
 On Raspberry pi you want to be using the linux-image-6.12.25 version of the kernel, e.g.
@@ -23,7 +25,7 @@ sudo apt install \
   libperl-dev kernel-wedge gettext po-debconf intltool-debian \
   autopoint diffstat ed dwarves
 
-sudo apt source linux
+apt source linux
 
 cd linux-*
 patch -p0 < ~/luddcam/libasi/linux-kernel-efw.patch

@@ -632,9 +632,6 @@ class Menu:
             onchange=select_mode,
             align=ALIGN_LEFT)
 
-    def handling_back(self):
-        return self.zoom or self.capture.get_stage() == Stage.PAUSE
-
     def cancel(self):
         if self.capture:
             self.capture.set_stage(Stage.STOP)
@@ -649,7 +646,7 @@ class Menu:
 
         if self.menu_active:
             for event in events:
-                if is_action(event):
+                if is_action(event) or is_back(event):
                     self.menu_active = False
 
             self.menu.update(events)
@@ -659,20 +656,20 @@ class Menu:
         stage = self.capture.get_stage()
 
         for event in events:
-            if is_left(event):
-                # we'll leave the active stage running
-                self.menu_active = True
-            elif is_start(event):
+            if is_start(event):
                 # print("SHUTTER")
+                self.zoom = self.view.disable_zoom()
                 if stage is Stage.CAPTURE:
                     self.capture.set_stage(Stage.PAUSE)
                 else:
                     self.capture.set_stage(Stage.CAPTURE)
-                self.zoom = self.view.disable_zoom()
             elif is_back(event):
+                print(f"BACK pressed, we are {stage}")
+                self.zoom = self.view.disable_zoom()
                 if stage == Stage.PAUSE:
                     self.capture.set_stage(Stage.LIVE)
-                    self.zoom = self.view.disable_zoom()
+                elif stage == Stage.LIVE:
+                    self.menu_active = True
             elif is_action(event):
                 # TODO zoom should be changed to a two stage process: first
                 # click shows a box, arrows move around, second click goes in
