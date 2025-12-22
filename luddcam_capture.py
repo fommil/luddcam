@@ -13,8 +13,7 @@
 # https://discuss.pixls.us/t/formats-and-headers-supported-required-by-siril/50531
 #
 # TODO X/Y and L/R on a SNES controller could be used for gain / exposure.
-# TODO DOWN is free, we could use it for playback
-# TODO RIGHT is free, we could use it for plate solving
+# TODO DOWN is free, we could use it for plate solving
 
 from datetime import datetime, timezone
 from enum import Enum
@@ -63,7 +62,7 @@ class Stage(Enum):
 compression_enabled = False
 
 class Capture:
-    def __init__(self, view, output_dir, camera, camera_settings, wheel, wheel_settings):
+    def __init__(self, view, output_dir, camera, camera_settings, wheel, wheel_settings, mode):
         self.view = view
         self.output_dir = output_dir
         self.camera = camera
@@ -73,7 +72,7 @@ class Capture:
 
         # variable that may be mutated by the UI threads
         self.lock = threading.Lock()
-        self.mode = Mode.SINGLE
+        self.mode = mode
         self.stage = Stage.STOP
         self.interval_idx = None
 
@@ -265,7 +264,16 @@ class Capture:
                 filt = self.wheel_settings.filters[capture_slot] or f"Slot {capture_slot + 1}"
             metadata = mk_metadata(capture_exposure, self.camera, filt, self.camera_settings.cooling)
             # some extra info for the view, might go unused but it could be useful
-            metadata_ = metadata + [("MODE", capture_mode), ("STAGE", capture_stage), ("IMAGE_COUNT", image_count)]
+            interval_info = ""
+            if capture_interval_idx:
+                index, sub = capture_interval_idx
+                steps = len(self.camera_settings.intervals)
+                interval_info = f"sub {sub} in step {index + 1} of {steps}"
+            metadata_ = metadata + [("MODE", capture_mode),
+                                    ("STAGE", capture_stage),
+                                    ("IMAGE_COUNT", image_count),
+                                    ("SINGLE_EXPTIME", self.camera_settings.exposure),
+                                    ("INTERVAL_INFO", interval_info)]
             if capture_stage is Stage.LIVE:
                 self.view.set_data(None, data, metadata_)
             elif not self.output_dir:
@@ -312,12 +320,10 @@ def mk_metadata(exp, camera, filt = None, cooling = None):
     if camera.offset is not None:
         metadata.append(("OFFSET", camera.offset))
     if camera.bayer:
-        # fits files flip the vertical vs camera ordering,
-        # so the bayer needs to be flipped as well.
-        bayer = camera.bayer[2:4] + camera.bayer[0:2]
-        # print(f"camera bayer is {camera.bayer}, flipped is {bayer}")
-        metadata.append(("SENSORBP", camera.bayer))
-        metadata.append(("BAYERPAT", bayer))
+        # https://siril.readthedocs.io/en/stable/file-formats/FITS.html#orientation-of-fits-images
+        metadata.append(("BAYERPAT", camera.bayer))
+        metadata.append(("ROWORDER", "BOTTOM-UP"))
+
     return metadata
 
 def save_fits(out, view, data, metadata, background = False):
@@ -502,7 +508,7 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
     target_width, target_height = surface.get_size()
     #print(surface.get_size())
     start = time.perf_counter()
-    bayer = meta.get("SENSORBP") or meta.get("BAYERPAT")
+    bayer = meta.get("BAYERPAT")
     img_rgb = downscale(img_raw, target_width, target_height, zoom, bayer)
     end = time.perf_counter()
     #print(f"scaling for the screen took {end - start:.2f}")
@@ -548,6 +554,8 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
 
     # potentially skip the histogram in live view too
     if not zoom:
+        w, h = surface.get_size()
+
         if (bitdepth := meta.get("BITDEPTH")):
             width = 128
             hist, saturated = histogram(img_raw, width, bitdepth)
@@ -580,6 +588,21 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
         top_left_rect.topleft = (10, 10)
         surface.blit(top_left_text, top_left_rect)
 
+        # bottom left should indicate what the shutter will do in LIVE
+        bottom_left = ""
+        if stage == Stage.LIVE:
+            bottom_left += "[" + mode.name
+            if mode is Mode.INTERVALS:
+                bottom_left = append_meta(bottom_left, "INTERVAL_INFO")
+            else:
+                bottom_left = append_meta(bottom_left, "SINGLE_EXPTIME", suffix = "s")
+            bottom_left += "]"
+
+        bottom_left_text = font.render(bottom_left, True, (255, 255, 255))
+        bottom_left_rect = bottom_left_text.get_rect()
+        bottom_left_rect.bottomleft = (10, h - 10)
+        surface.blit(bottom_left_text, bottom_left_rect)
+
         # icons here might be nicer
         top_right = ""
         if saved:
@@ -590,14 +613,14 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
         if top_right:
             text = font.render(top_right, True, (255, 255, 255))
             rect = text.get_rect()
-            w, h = surface.get_size()
             rect.topright = (w - 10, 10)
             surface.blit(text, rect)
 
-        # TODO more stats and icons
-
 class Menu:
-    def __init__(self, output_dir, camera, camera_settings, wheel, wheel_settings):
+    def __init__(self, output_dir, camera, camera_settings, wheel, wheel_settings, mode):
+        if not mode or (mode is Mode.INTERVALS and not camera_settings.intervals):
+            mode = Mode.SINGLE
+
         surface = pygame.display.get_surface()
         w = surface.get_width()
         h = surface.get_height()
@@ -610,8 +633,10 @@ class Menu:
             self.view.message("no camera")
             return
 
-        self.capture = Capture(self.view, output_dir, camera, camera_settings, wheel, wheel_settings)
+        self.capture = Capture(self.view, output_dir, camera, camera_settings, wheel, wheel_settings, mode)
         self.capture.start()
+
+        self.screensaver = False
 
         self.menu = luddcam_settings.mk_menu("Capture")
         self.menu_active = False
@@ -623,19 +648,23 @@ class Menu:
         items = [("Single", Mode.SINGLE), ("Repeat", Mode.REPEAT)]
         if camera_settings.intervals:
             items.append(("Intervals", Mode.INTERVALS))
-        # TODO persist in the session which Mode is default, so going into the
-        # settings doesn't erase the choice.
+
         self.menu.add.selector(
             "Mode: ",
             items=items,
-            default=0,
+            default=mode.value,
             onchange=select_mode,
             align=ALIGN_LEFT)
+
+    def get_mode(self):
+        return self.capture.mode
 
     def cancel(self):
         if self.capture:
             self.capture.set_stage(Stage.STOP)
             self.capture = None
+        if self.screensaver:
+            backlight_on()
 
     def update(self, events):
         screen = pygame.display.get_surface()
@@ -656,6 +685,13 @@ class Menu:
         stage = self.capture.get_stage()
 
         for event in events:
+            if self.screensaver and is_button(event):
+                print("waking screen")
+                self.screensaver = False
+                backlight_on()
+                if not is_start(event):
+                    continue
+
             if is_start(event):
                 # print("SHUTTER")
                 self.zoom = self.view.disable_zoom()
@@ -664,12 +700,17 @@ class Menu:
                 else:
                     self.capture.set_stage(Stage.CAPTURE)
             elif is_back(event):
-                print(f"BACK pressed, we are {stage}")
                 self.zoom = self.view.disable_zoom()
                 if stage == Stage.PAUSE:
                     self.capture.set_stage(Stage.LIVE)
                 elif stage == Stage.LIVE:
                     self.menu_active = True
+                else:
+                    # back is now screensaver
+                    self.screensaver = True
+                    print("blanking screen")
+                    screen.fill((0, 0, 0))
+                    backlight_off()
             elif is_action(event):
                 # TODO zoom should be changed to a two stage process: first
                 # click shows a box, arrows move around, second click goes in
@@ -678,8 +719,10 @@ class Menu:
                 # highlight that we're dead on center, maybe by showing a faded
                 # version of the center view.
                 self.zoom = self.view.toggle_zoom()
+            # FIXME LEFT/RIGHT could be used to PAUSE and go to playback from disk
 
-        self.view.blit(screen)
+        if not self.screensaver:
+            self.view.blit(screen)
 
 # zoom means to crop to the target size
 def downscale(mono, target_width, target_height, zoom, bayer):
@@ -936,16 +979,42 @@ def render_histogram(surface, hist, saturated, font,
         rect.topright = (w, h)
         surface.blit(surf, rect)
 
+BACKLIGHT_DIR = "/sys/class/backlight"
+def backlight_off(base=BACKLIGHT_DIR):
+    if not os.path.isdir(base):
+        return
+    for dev in os.listdir(base):
+        path = os.path.join(base, dev, "brightness")
+        if os.path.exists(path):
+            with open(path, "w") as f:
+                f.write(str(0))
+
+def backlight_on(base=BACKLIGHT_DIR):
+    for dev in os.listdir(base):
+        path = os.path.join(base, dev, "brightness")
+        path_m = os.path.join(base, dev, "max_brightness")
+        max_brightness = 255
+        if os.path.exists(path_m):
+            max_brightness = int(open(path).read())
+        if os.path.exists(path):
+            with open(path, "w") as f:
+                f.write(str(max_brightness))
+
 if __name__ == "__main__":
     pygame.font.init()
 
     exp = 10.0
     # 3 minute dual band exposure
-    # f = "test_data/sony_a7iii/m31/exposures/10.fit.fz"
+    f = "test_data/sony_a7iii/m31/exposures/10.fit.fz"
     # actually a 30 second rgb exposure
-    f = "test_data/sony_a7iii/m31/exposures/1.fit.fz"
+    # f = "test_data/sony_a7iii/m31/exposures/1.fit.fz"
     # sony a7iii is RGGB
-    bayer = "RGGB"
+
+    h = fitsio.FITS(f)[1].read_header()
+    bayer = h.get("BAYERPAT")
+    # print(f"BAYER={bayer}")
+
+    # bayer = "RGGB"
     #bayer = None
 
     # a picture of a tree
@@ -958,8 +1027,7 @@ if __name__ == "__main__":
 
     surface = pygame.Surface((800, 600))
     # flipping a fits image has the impact of getting us back to sensor
-    # coordinates (zero is top left). But it also flips the bayer
-    # pattern back to the sensor pattern, not what is in the fits.
+    # coordinates (zero is top left).
     img_raw = np.flipud(fitsio.FITS(f)[1].read())
 
     zoom = False
@@ -969,7 +1037,7 @@ if __name__ == "__main__":
         "EXPTIME": exp,
         "GAIN": 180.0,
         "FILTER": "L",
-        "SENSORBP": bayer,
+        "BAYERPAT": bayer,
         "STAGE": Stage.CAPTURE,
         "MODE": Mode.REPEAT
     }
@@ -977,7 +1045,7 @@ if __name__ == "__main__":
     font = pygame.font.Font(luddcam_settings.hack, 14)
 
     start = time.perf_counter()
-    render_frame_for_screen(surface, img_raw, zoom, meta, out, font)
+    render_frame_for_screen(surface, img_raw, zoom, meta, out, font, False, False)
     end = time.perf_counter()
     print(f"rendering took {end - start:.2f}")
 

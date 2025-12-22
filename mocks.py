@@ -59,8 +59,9 @@ class Camera:
         h = fitsio.FITS(exposures[0])[1].read_header()
         # print(h)
         self.bayer = h.get("BAYERPAT")
-        if self.bayer:
-             self.bayer = self.bayer[2:4] + self.bayer[0:2]
+        if h.get("ROWORDER") != 'BOTTOM-UP':
+            self.bayer = self.bayer[2:4] + self.bayer[0:2]
+
         self.pixelsize = float(h["XPIXSZ"])
         # probably lost from the originals, not a standard
         self.bitdepth = h.get("BITDEPTH") or 14

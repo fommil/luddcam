@@ -16,18 +16,8 @@ snap("settings_3")
 right()
 snap("settings_4")
 
-# create a simple schedule
-down(2)
-a()
-down()
-left(3) # reduce default exposure time to 10 seconds
-down()
-a()
-up(3)
-snap("settings_4_set")
-
 select() # close settings, go to live view
-snap("live_started")
+#snap("live_started")
 nothing(3)
 snap("live_capture")
 nothing(3)
@@ -36,7 +26,7 @@ nothing(3)
 snap("live_zoom")
 a() # cancel zoom
 start() # single 2 second exposure
-snap("capture_single_started")
+#snap("capture_single_started")
 nothing(4)
 snap("capture_single_done")
 expect_images(1)
@@ -50,8 +40,12 @@ snap("live_again")
 b()
 right()
 a()
+
+nothing(2)
+snap("live_repeat")
+
 start() # 2 second exposures
-snap("capture_repeat_started")
+#snap("capture_repeat_started")
 nothing(9)
 start()
 snap("capture_repeat_done")
@@ -63,18 +57,32 @@ a()
 nothing(2)
 snap("capture_paused_zoom")
 
+# create a simple schedule
+select()
+down(2)
+a()
+down()
+left(3) # reduce default exposure time to 10 seconds
+down()
+a()
+up(3)
+snap("settings_4_set")
+select()
+
 # swap to intervals, 10 second exposures
-b() # exit zoom, back to live
-b() # enters mode selector
+b() # enters mode selector, remembered repeat
 right()
 b() # alt way of exiting selector
 
+nothing(2)
+snap("live_intervals")
+
 start()
-snap("capture_intervals_started")
+#snap("capture_intervals_started")
 nothing(11)
 # first capture
 snap("capture_intervals_first")
-up() # screen off
+b() # screen off
 nothing(1)
 snap("capture_intervals_screen_off")
 nothing(10)

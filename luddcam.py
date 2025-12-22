@@ -63,34 +63,12 @@ def disable_mouse():
     pygame.mouse.set_visible(False)
 
 class Mode(IntEnum):
-    BLANK    = 0
-    SETTINGS = 1
-    CHOOSE   = 2
-    CAPTURE  = 3
-    GUIDE    = 4
+    SETTINGS = 0
+    CHOOSE   = 1
+    CAPTURE  = 2
+    GUIDE    = 3
 
 ready = threading.Event()
-
-BACKLIGHT_DIR = "/sys/class/backlight"
-def backlight_off(base=BACKLIGHT_DIR):
-    if not os.path.isdir(base):
-        return
-    for dev in os.listdir(base):
-        path = os.path.join(base, dev, "brightness")
-        if os.path.exists(path):
-            with open(path, "w") as f:
-                f.write(str(0))
-
-def backlight_on(base=BACKLIGHT_DIR):
-    for dev in os.listdir(base):
-        path = os.path.join(base, dev, "brightness")
-        path_m = os.path.join(base, dev, "max_brightness")
-        max_brightness = 255
-        if os.path.exists(path_m):
-            max_brightness = int(open(path).read())
-        if os.path.exists(path):
-            with open(path, "w") as f:
-                f.write(str(max_brightness))
 
 def main():
     pygame.display.init()
@@ -131,6 +109,8 @@ def main():
     choose_menu.add.button("Capture", action=lambda: push(Mode.CAPTURE), align=ALIGN_LEFT)
     # choose_menu.add.button("Guide", action=lambda: push(Mode.GUIDE), align=ALIGN_LEFT)
 
+    capture_mode = None
+
     ready.set()
 
     while True:
@@ -149,15 +129,6 @@ def main():
                 quitter = threading.Thread(target=pygame.quit, daemon=True, name="quit")
                 quitter.start()
                 return
-            elif mode == Mode.BLANK and is_button(event):
-                print("waking screen")
-                pop()
-                backlight_on()
-            elif mode > Mode.CHOOSE and is_up(event):
-                print("blanking screen")
-                push(Mode.BLANK)
-                surface.fill((0, 0, 0))
-                backlight_off()
             elif mode == Mode.SETTINGS and is_menu(event):
                 print("exiting settings")
                 settings_menu.save()
@@ -166,7 +137,8 @@ def main():
                     settings_menu.camera,
                     settings_menu.camera_settings(),
                     settings_menu.wheel,
-                    settings_menu.wheel_settings())
+                    settings_menu.wheel_settings(),
+                    capture_mode)
                 # guide_menu = luddcam_guide.Menu(
                 #     settings_menu.output_dir(),
                 #     settings_menu.guide
@@ -176,6 +148,8 @@ def main():
                 print("entering settings")
                 # TODO warning / ack about ending capture sessions
                 if capture_menu:
+                    capture_mode = capture_menu.get_mode()
+                    # print(f"capture will recover with {capture_mode}")
                     capture_menu.cancel()
                 if guide_menu:
                     guide_menu.cancel()

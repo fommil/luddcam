@@ -8,10 +8,12 @@ export PYTHONUNBUFFERED="${PYTHONUNBUFFERED:-1}"
 export SDL_NOMOUSE="${SDL_NOMOUSE:-1}"
 export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-dummy}"
 
-if [[ -v DISPLAY ]] ; then
+if [[ -n "$DISPLAY" ]]; then
     export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-x11}"
-else
+elif ls /dev/dri/card* >/dev/null 2>&1; then
     export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-kmsdrm}"
+else
+    export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-dummy}"
 fi
 
 MACHINE="$(uname -m)"
@@ -34,12 +36,21 @@ case "${1:-}" in
             sudo apt install exfat-fuse
             sudo ln -fs mount.exfat-fuse /usr/sbin/mount.exfat
 
+            sudo mkdir /media/$USER || true
+            sudo chmod 750 /media/$USER || true
+
             mkdir -p $HOME/.config/systemd/user || true
             sed "s~PWD~${PWD}~g" luddcam.service > $HOME/.config/systemd/user/luddcam.service
 
-            sudo loginctl enable-linger $(whoami)
+            sudo loginctl enable-linger $USER
             systemctl --user daemon-reload
             systemctl --user enable luddcam.service
+
+            # probably installed already, used by gpio based screens
+            sudo apt install python3-spidev python3-gpiozero
+
+            # TODO should we maybe update the firmware config file
+            #      to save the user from using the gui?
         fi
 
         # needed on debian, safe and sensible on the pi
@@ -53,6 +64,13 @@ case "${1:-}" in
         if [ "${2:-}" = "-force" ] ; then
             rm -f luddcam-settings.json || true
         fi
+
+        # turns off the red power, and green activity, LED on rpis
+        for LED in PWR ACT ; do
+            echo none | sudo tee /sys/class/leds/${LED}/trigger || true
+            echo 0 | sudo tee /sys/class/leds/${LED}/brightness || true
+        done
+
         exec python3 regression_tests.py | grep -v DETECT_AVX2
         ;;
     *)

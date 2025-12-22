@@ -1,6 +1,7 @@
 # touptek implementation of the Camera duck api
 
 import ctypes
+import math
 import numpy as np
 import time
 
@@ -32,6 +33,13 @@ def callback(ev, ctx):
     # print(f"got a callback about {ev}")
     if ev == toupcam.TOUPCAM_EVENT_IMAGE:
         ctx.image_event()
+
+def gain_to_cb(gain):
+    assert gain > 0
+    return int(round(200.0 * math.log10(gain / 100.0)))
+
+def cb_to_gain(cb):
+    return int(round(100.0 * (10.0 ** (cb / 200.0))))
 
 # this should look like an asi2.Camera duck
 class Camera:
@@ -73,8 +81,10 @@ class Camera:
         self.c.put_Roi(0, 0, 0, 0)
 
         self.has_gain = True
-        self.gain = self.c.get_ExpoAGain()
-        self.gain_min, self.gain_max, self.gain_default = self.c.get_ExpoAGainRange()
+        self.gain = gain_to_cb(self.c.get_ExpoAGain())
+        self.gain_min, self.gain_max, self.gain_default = (
+            gain_to_cb(g) for g in self.c.get_ExpoAGainRange()
+        )
         # TODO table of unity gains
         self.gain_unity = None
 
@@ -140,9 +150,10 @@ class Camera:
         self.c.Trigger(0)
         self.img = None
 
-    def set_gain(self, gain):
+    def set_gain(self, cb):
+        gain = cb_to_gain(cb)
         self.c.put_ExpoAGain(gain)
-        self.gain = self.c.get_ExpoAGain()
+        self.gain = gain_to_cb(self.c.get_ExpoAGain())
 
     def get_temp(self):
         if self.d.model.flag & toupcam.TOUPCAM_FLAG_GETTEMPERATURE:
@@ -160,11 +171,11 @@ if __name__ == '__main__':
 
     #camera.set_cooling(0)
     # print(f"gain range = ({camera.gain_min}, {camera.gain_default}, {camera.gain_max}), unity = {camera.gain_unity}")
-    camera.set_gain(camera.gain_unity or 500)
+    camera.set_gain(camera.gain_unity or 10)
 
     # time.sleep(10)
     print(f"seen {camera.name} ({camera.pixelsize:.2f} µm) (exps = {camera.exposure_min}...{camera.exposure_max}) [guide={camera.guide}]")
-    print(f"temp = {camera.get_temp()}")
+    print(f"temp = {camera.get_temp()}, gain = {camera.gain}, gain_bounds = {camera.gain_min},{camera.gain_max}")
 
     camera.capture_start(1)
     time.sleep(1)

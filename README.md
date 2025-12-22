@@ -1,23 +1,23 @@
-**LuddCam** is a minimalist astrophotography control system. Designed for a Raspberry Pi with a screen and controller, it brings the feel of a classic DSLR to your astrocamera.
+**Luddcam** is a minimalist astrophotography control system. Designed for a Raspberry Pi with a screen and controller, it brings the feel of a classic DSLR to your astrocamera.
 
-LuddCam requires you to be physically present: polar aligning through a scope, focusing, framing your shot, checking your histograms, pressing the shutter, waiting patiently to see how it comes out. It's not about convenience or performance, it's about connection.
+Luddcam requires you to be physically present: polar aligning through a scope, focusing, framing your shot, checking your histograms, pressing the shutter, waiting patiently to see how it comes out. It's not about convenience or performance, it's about connection.
 
-LuddCam supports a few carefully chosen "cheat codes", like electronic filter wheels. But they are there as helpers, not crutches. Astrophotographers are encouraged to star hop to their targets (following printed star charts) instead of using go-to, use their mount's manual tracking or periodic error correction (PEC) whenever exposure and focal lengths allow it, and to manually change filters. The luddite way is to minimise the amount of technology used for any given picture, but the main objective is to be present, under the stars.
+Luddcam supports a few carefully chosen "cheat codes", like electronic filter wheels. But they are there as helpers, not crutches. Astrophotographers are encouraged to star hop to their targets (following printed star charts) instead of using go-to, use their mount's manual tracking or periodic error correction (PEC) whenever exposure and focal lengths allow it, and to manually change filters. The luddite way is to minimise the amount of technology used for any given picture, but the main objective is to be present, under the stars.
 
-Whether you're a DIY tinker-photographer, an analog romantic, or just someone who enjoys feeling the click of a real button under a dark sky, LuddCam is for you.
+Whether you're a DIY tinker-photographer, an analog romantic, or just someone who enjoys feeling the click of a real button under a dark sky, Luddcam is for you.
 
 If you want to take the best picture possible, and squeeze every ounce of performance out of your gear, get an [ASIAIR](https://www.zwoastro.com/product-category/asiair/), [StellaVita](https://www.touptekastro.com/en-eu/products/stellavita), [StellarMate](https://stellarmate.com/) or a laptop with [SharpCap](https://www.sharpcap.co.uk/), [NINA](https://nighttime-imaging.eu/) and [PHD2](https://openphdguiding.org/).
 
 # User Guide
 
-LuddCam is designed to look and feel like a DSLR. The expected input is a retro NES controller and the controls are designed to be consistent between all modes:
+Luddcam is designed to look and feel like a DSLR and requires a gamepad controller for input:
 
 - `START` is the shutter
 - `SELECT` is the menu
 - `A` is the primary action
 - `B` is the secondary action
 
-When LuddCam starts up, it drops into the menu allowing selection of the camera (or filter wheel if you have one)
+When Luddcam starts up, it drops into the menu allowing selection of the camera (or filter wheel if you have one)
 
 <p align="center"><img src="./test_data/sony_a7iii/m31/assertions/settings_1.png" width="30%"></p>
 
@@ -47,21 +47,63 @@ Once you're ready to start your session, press `B` to get back into `LIVE` mode,
 
 All files are saved as (uncompressed) fits files and are flushed to disk, so once it says `SAVED` on the screen, even a dead battery won't ruin your night. A DSLR style naming convention is used so that processing follows your standard workflow and all the fits headers you'd expect to see are there.
 
-Once you've started the session, every image will appear on the screen as it is captured. To turn off the screen and save both your night vision and your batteries, press the `UP` button. Any button will wake the screen again, but it's best to use `UP` just to be consistent. Note that going to the menu while a capture is in-flight will cancel it.
+Once you've started the session with the shutter `START` button, every image will appear on the screen as it is captured. `SELECT` (which goes to the menu) will cancel the session. `START` will pause a session.
 
-To pause a repeating capture session, press the shutter `START`.
-
-`B`, `DOWN` and `RIGHT` are reserved for future use.
+To turn off the screen and save both your night vision and your batteries, press the `B` button. Any button will wake the screen and be otherwise ignored (except `START` or `SELECT`, which end the session).
 
 # Hardware
 
-Caveat: LuddCam currently only works with ZWO / Touptek cameras, ZWO filter wheels and ST4 guided mounts. If you have an EFWmini you might hit a linux kernel bug that can be resolved by following the instructions in `libasi/efw.txt`.
+Caveat: Luddcam currently only works with ZWO / Touptek cameras, ZWO filter wheels and ST4 guided mounts. If you have an EFWmini you might hit a linux kernel bug that can be resolved by following the instructions in `libasi/efw.txt`.
 
-It is designed to run on a Raspberry Pi. You can use a Model 4b or anything more recent.
+It is designed to run on a [Raspberry Pi 4b](https://thepihut.com/products/raspberry-pi-starter-kit?variant=20336446079038), but should run on anything more recent. I test with 4GB of RAM but it might work with 1GB / 2GB.
 
-Beyond the [Raspberry Pi 4B with 4GB+](https://thepihut.com/products/raspberry-pi-starter-kit?variant=20336446079038), I recommend the [WaveShare 4.3" LCD screen](https://thepihut.com/products/4-3-dsi-capacitive-touchscreen-display-for-raspberry-pi-800x480) ([the Amazon version includes a case](https://www.amazon.co.uk/dp/B09B29T8YF)) and [NES gamepad](https://thepihut.com/products/nes-style-raspberry-pi-compatible-usb-gamepad-controller). In total this should be just over $100.
+I recommend the [WaveShare 4.26" e-Paper](https://www.waveshare.com/wiki/4.26inch_e-Paper_HAT_Manual) or [WaveShare 4.3" LCD screen](https://thepihut.com/products/4-3-dsi-capacitive-touchscreen-display-for-raspberry-pi-800x480) ([the Amazon version includes a case](https://www.amazon.co.uk/dp/B09B29T8YF)) and [NES gamepad](https://thepihut.com/products/nes-style-raspberry-pi-compatible-usb-gamepad-controller) or [Waveshare Game HAT](https://www.amazon.co.uk/dp/B07G57BC3R). In total this should be just over $100.
 
-I've found that after physically attaching the LCD screen the following entry in `/boot/firmware/config.txt` is all that is needed:
+After physically attaching the screen to the pi, follow these instructions to get a stock raspberry pi up and running with a microsd:
+
+1. on PC
+   1. install the latest [rpi-imager](https://www.raspberrypi.com/software/)
+   1. pick the correct device
+   1. choose the 64 bit operating system
+   1. customise
+      1. pick a hostname, e.g. `astro`
+      1. `pi` as the username and password
+      1. enable ssh (I use a public key)
+      1. (optional) add your wifi here
+   1. flash the drive and wait
+1. put the sd into the raspberry pi, and turn it on
+   1. `ssh pi@astro`
+   2. `sudo apt update && sudo apt upgrade`
+   3. turn off the desktop mode
+
+```
+sudo raspi-config
+
+=> System Options
+=> Boot / Auto Login
+=> Console Text
+=> Finish and reboot
+```
+
+## SPI
+
+FIXME make e-Paper devices actually work
+
+If you installed the screen by plugging into the HAT (40 big pins), enable SPI with:
+
+```
+sudo raspi-config
+=> Interface Options => SPI => Enable
+=> Finish and reboot
+```
+
+This is not a generic output device so on reboot don't expect to see the login console.
+
+## DSI
+
+If you installed the screen by plugging in an incredibly fiddly cable, enable DSI with:
+
+Add the following entry in `/boot/firmware/config.txt` is all that is needed:
 
 ```
 [all]
@@ -70,31 +112,25 @@ dtoverlay=vc4-kms-dsi-waveshare-panel,4_3_inch
 
 Unfortunately the backlight cannot be turned off entirely, but we try to dim it as much as possible. I think this might be the biggest contributor to power usage; I'm able to get about 3 hours on a planetary camera taking 10 second exposures with a 5amp / 120g usb power bank, and almost 12 hours with a larger 20amp / 250g bank.
 
-Another option is the [Waveshare Game HAT](https://www.amazon.co.uk/dp/B07G57BC3R) which has less screen resolution but has integrated controls, and can run off a battery (although it won't last very long). However, it's not very weather resistant, so may need a custom 3d case to lock it down a bit further.
-
 # Installation
 
 This assumes that you already have a Raspberry Pi 4b (or higher) that is relatively up to date.
 
-Download [the latest release](https://github.com/fommil/luddcam/releases) "Source code (tar.gz)" to your raspberry pi and type
+Download [the latest release](https://github.com/fommil/luddcam/releases) "Source code (tar.gz)" to your raspberry pi or install with `git` (recommended)
 
 ```
-tar xf luddcam-*.tar.gz
+git clone https://github.com/fommil/luddcam.git
+```
+
+then (which will also upgrade existing installations)
+
+```
 cd luddcam
+git pull
 ./luddcam.sh install
 ```
 
-which will need network access to install dependencies (but is not needed thereafter). Then (again, on the pi) run these commands so that it boots up into the console instead of the default graphical interface.
-
-```
-sudo raspi-config
-
-=> System Options
-=> Boot / Auto Login
-=> Console
-```
-
-If you're a developer wanting to contribute to LuddCam or to test it out on a PC, you need to check out this git repository (which requires `git lfs` to be installed for the binaries). Read the (simple) install script to find out what you need to install through your package manager. It works on Debian 13.
+then turn it off and on again. You should see luddcam!
 
 # Roadmap
 
@@ -111,13 +147,14 @@ If you're a developer wanting to contribute to LuddCam or to test it out on a PC
 
 ### Beta
 
-- guiding
+- e-paper
 - playback
+- plate solving
+- polar alignment
 
 ### Gamma
 
-- plate solving
-- polar alignment
+- guiding
 
 ### Delta
 
@@ -127,10 +164,9 @@ If you're a developer wanting to contribute to LuddCam or to test it out on a PC
 
 For version 2 I want to focus on hardware. There's a few directions I want to explore:
 
-1. Night Vision: [e-paper](https://thepihut.com/products/4-26-e-paper-display-hat-800x480), much kinder on night vision than LED screens.
-2. Cost: running on the smaller a [Raspberry Pi Zero 2](https://www.raspberrypi.com/products/raspberry-pi-zero-2-w/), possibly with a [GamePi13](https://thepihut.com/products/gamepi13-1-3-lcd-game-console-for-raspberry-pi-240-x240), could get the cost to less than $50.
-3. Size: if power consumption can be optimised, and casings made small enough, it might be possible to have something that could control a RASA / HyperStar without  diffraction spikes. That could involve an [external display](https://thepihut.com/products/m5papers3-esp32s3-development-kit-with-4-7-eink-display-960-x-540).
-4. Voice: a microphone and speaker could mean replacing the controller and screen, e.g. "how do I get to Casseopia?" followed by "left a bit, up a bit" responses. Or a plug-and-play standalone autoguider.
+1. Cost: running on the smaller a [Raspberry Pi Zero 2](https://www.raspberrypi.com/products/raspberry-pi-zero-2-w/), possibly with a [GamePi13](https://thepihut.com/products/gamepi13-1-3-lcd-game-console-for-raspberry-pi-240-x240), could get the cost to less than $50.
+2. Size: if power consumption can be optimised, and casings made small enough, it might be possible to have something that could control a RASA / HyperStar without  diffraction spikes. That could involve an [external display](https://thepihut.com/products/m5papers3-esp32s3-development-kit-with-4-7-eink-display-960-x-540).
+3. Voice: a microphone and speaker could mean replacing the controller and screen, e.g. "how do I get to Casseopia?" followed by "left a bit, up a bit" responses. Or a plug-and-play standalone autoguider.
 
 # Luddite Score
 

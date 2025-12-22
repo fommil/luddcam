@@ -135,8 +135,10 @@ class Menu:
             path = mocks.output_dir()
         elif self.settings.drive:
             path = get_drive(self.settings.drive)
+        else:
+            path = None
 
-        if os.path.isdir(path) and os.access(path, os.W_OK):
+        if path and os.path.isdir(path) and os.access(path, os.W_OK):
             return path
 
     def exposure_options(self):
@@ -674,13 +676,19 @@ class Menu:
                 self.camera.set_gain(gain)
                 print(f"changed camera gain to {gain}")
             gain = self.camera_settings().gain
-            start = self.camera.gain_min
-            end = self.camera.gain_max
+            # round to nearest 10, normalise later
+            start = (self.camera.gain_min // 10) * 10
+            end = ((self.camera.gain_max + 9) // 10) * 10
+            # round up / down to the nearest 10
             step = round((end - start) / 10)
             options = list(range(start, end + 1, step))
             if self.camera.gain_unity:
                 options.append(self.camera.gain_unity)
             options.append(self.camera.gain_default)
+            options.append(self.camera.gain_min)
+            options.append(self.camera.gain_max)
+            options.append(gain)
+            options = [o for o in options if self.camera.gain_min <= o <= self.camera.gain_max]
             options = sorted(set(options))
             menu.add.selector(
                 "Gain: ",
@@ -825,7 +833,7 @@ def list_drives():
             f"{d}:\\" for d in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
             if win32file.GetDriveType(f"{d}:\\") == win32file.DRIVE_REMOVABLE
         ]
-    else:
+    elif os.path.exists(MEDIA_BASE):
         return os.listdir(MEDIA_BASE)
 
 def get_drive(relative):
