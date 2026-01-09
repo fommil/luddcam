@@ -924,7 +924,7 @@ def debayer(data, bayer):
         bl = data[1::2, 0::2]
         R, G, B = bl, tl, tr
     else:
-        raise ValueError(f"Unsupported Bayer pattern: {pattern}")
+        raise ValueError(f"Unsupported Bayer pattern: {bayer}")
 
     return np.stack((R, G, B), axis=-1)
 
@@ -995,7 +995,7 @@ def backlight_on(base=BACKLIGHT_DIR):
         path_m = os.path.join(base, dev, "max_brightness")
         max_brightness = 255
         if os.path.exists(path_m):
-            max_brightness = int(open(path).read())
+            max_brightness = int(open(path_m).read())
         if os.path.exists(path):
             with open(path, "w") as f:
                 f.write(str(max_brightness))

@@ -596,7 +596,7 @@ class Wheel:
         self.name = self.info.identifier()
         self.slots = self.info.slotNum
         # sets bi-directional movement
-        call(self.lib.EFWSetPosition(self.i, ASI_BOOL.ASI_FALSE))
+        call(self.lib.EFWSetDirection(self.i, ASI_BOOL.ASI_FALSE))
 
     def calibrate(self):
         call(self.lib.EFWCalibrate(self.i))
