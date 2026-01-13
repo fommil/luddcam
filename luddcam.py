@@ -14,6 +14,7 @@ import pygame
 import pygame_menu
 import pygame_menu.controls as ctrl
 
+import luddcam_epaper
 import luddcam_settings
 import luddcam_capture
 import luddcam_guide
@@ -80,8 +81,12 @@ def main():
     clock = pygame.time.Clock()
     pygame.init()
 
+    epaper = luddcam_epaper.init()
+
     if pygame.display.get_driver() == "x11":
         surface = pygame.display.set_mode((800, 600))
+    elif epaper:
+        surface = pygame.display.set_mode(epaper.size())
     else:
         surface = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
 
@@ -100,9 +105,11 @@ def main():
         nonlocal last
         last = mode
         mode = new_mode
+        epaper.hint()
     def pop():
         nonlocal mode
         mode = last
+        epaper.hint()
 
     choose_menu = luddcam_settings.mk_menu("Choose Mode")
     choose_menu.add.vertical_margin(10)
@@ -133,6 +140,7 @@ def main():
                 print("exiting settings")
                 settings_menu.save()
                 capture_menu = luddcam_capture.Menu(
+                    epaper,
                     settings_menu.output_dir(),
                     settings_menu.camera,
                     settings_menu.camera_settings(),
@@ -166,6 +174,7 @@ def main():
             guide_menu.update(events)
 
         pygame.display.update()
+        epaper.sync(surface)
         clock.tick(FPS)
 
 if __name__ == '__main__':

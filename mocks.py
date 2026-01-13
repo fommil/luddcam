@@ -107,3 +107,35 @@ class Camera:
         #print(f"looking for data in {(self.gain, self.exposure)}")
         # we require all combinations to exist
         return self.data[key]
+
+# the tests can read this and assert on the contents.
+# it's actually a PIL.Image
+epd_buf = None
+
+# mock of a waveshare_epd
+class EPD:
+    def __init__(self):
+        self.width = 800
+        self.height = 600
+
+    def getbuffer(self, img):
+        return img # noop
+
+    def init(self):
+        pass
+
+    def display(self, buf):
+        global epd_buf
+        epd_buf = buf
+
+    def display_Base(self, buf):
+        self.display(buf)
+
+    def display_Partial(self, buf):
+        self.display(buf)
+
+    def Clear(self):
+        self.display(None)
+
+    def sleep(self):
+        pass

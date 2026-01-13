@@ -1,5 +1,7 @@
 # initial settings
 snap("settings_1")
+nothing(1)
+snap("settings_1e", epaper=True)
 
 # select filter wheel
 right()
@@ -21,9 +23,12 @@ select() # close settings, go to live view
 nothing(3)
 snap("live_capture")
 nothing(3)
+snap("live_capture_e", epaper=True)
 a() # initiate zoom
 nothing(3)
 snap("live_zoom")
+nothing(1)
+snap("live_zoom_e", epaper=True)
 a() # cancel zoom
 start() # single 2 second exposure
 #snap("capture_single_started")

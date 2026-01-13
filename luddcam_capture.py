@@ -617,7 +617,7 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
             surface.blit(text, rect)
 
 class Menu:
-    def __init__(self, output_dir, camera, camera_settings, wheel, wheel_settings, mode):
+    def __init__(self, epaper, output_dir, camera, camera_settings, wheel, wheel_settings, mode):
         if not mode or (mode is Mode.INTERVALS and not camera_settings.intervals):
             mode = Mode.SINGLE
 
@@ -625,6 +625,7 @@ class Menu:
         w = surface.get_width()
         h = surface.get_height()
 
+        self.epaper = epaper
         self.view = View(w, h)
         self.zoom = False # used to capture BACK
         if not camera:
@@ -657,7 +658,8 @@ class Menu:
             align=ALIGN_LEFT)
 
     def get_mode(self):
-        return self.capture.mode
+        if self.capture:
+            return self.capture.mode
 
     def cancel(self):
         if self.capture:
@@ -689,6 +691,7 @@ class Menu:
                 print("waking screen")
                 self.screensaver = False
                 backlight_on()
+                self.epaper.wake()
                 if not is_start(event):
                     continue
 
@@ -711,6 +714,7 @@ class Menu:
                     print("blanking screen")
                     screen.fill((0, 0, 0))
                     backlight_off()
+                    self.epaper.sleep()
             elif is_action(event):
                 # TODO zoom should be changed to a two stage process: first
                 # click shows a box, arrows move around, second click goes in
@@ -719,7 +723,7 @@ class Menu:
                 # highlight that we're dead on center, maybe by showing a faded
                 # version of the center view.
                 self.zoom = self.view.toggle_zoom()
-            # FIXME LEFT/RIGHT could be used to PAUSE and go to playback from disk
+            # TODO LEFT/RIGHT could be used to PAUSE and go to playback from disk
 
         if not self.screensaver:
             self.view.blit(screen)

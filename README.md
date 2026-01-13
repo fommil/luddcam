@@ -87,8 +87,6 @@ sudo raspi-config
 
 ## SPI
 
-FIXME make e-Paper devices actually work
-
 If you installed the screen by plugging into the HAT (40 big pins), enable SPI with:
 
 ```

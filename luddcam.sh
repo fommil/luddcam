@@ -8,8 +8,10 @@ export PYTHONUNBUFFERED="${PYTHONUNBUFFERED:-1}"
 export SDL_NOMOUSE="${SDL_NOMOUSE:-1}"
 export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-dummy}"
 
-if [[ -n "$DISPLAY" ]]; then
+if [[ -n "${DISPLAY:-}" ]]; then
     export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-x11}"
+elif ls /dev/spidev* >/dev/null 2>&1; then
+    export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-dummy}"
 elif ls /dev/dri/card* >/dev/null 2>&1; then
     export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-kmsdrm}"
 else
@@ -35,6 +37,7 @@ case "${1:-}" in
             # workaround old bugs in the udevil support for exfat, works on debian
             sudo apt install exfat-fuse
             sudo ln -fs mount.exfat-fuse /usr/sbin/mount.exfat
+            sudo sed -i '/default_options_exfat/s/, nonempty//' /etc/udevil/udevil.conf
 
             sudo mkdir /media/$USER || true
             sudo chmod 750 /media/$USER || true
@@ -65,15 +68,17 @@ case "${1:-}" in
             rm -f luddcam-settings.json || true
         fi
 
-        # turns off the red power, and green activity, LED on rpis
-        for LED in PWR ACT ; do
-            echo none | sudo tee /sys/class/leds/${LED}/trigger || true
-            echo 0 | sudo tee /sys/class/leds/${LED}/brightness || true
-        done
-
         exec python3 regression_tests.py | grep -v DETECT_AVX2
         ;;
     *)
+        # turns off the red power, and green activity, LED on rpis
+        if [ -f /sys/class/leds/PWR ] && [ -f /sys/class/leds/ACT ] ; then
+            for LED in PWR ACT ; do
+                echo none | sudo tee /sys/class/leds/${LED}/trigger || true
+                echo 0 | sudo tee /sys/class/leds/${LED}/brightness || true
+            done
+        fi
+
         exec python3 luddcam.py
         ;;
 esac

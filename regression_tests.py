@@ -10,6 +10,8 @@ import traceback
 import threading
 import time
 
+from PIL import Image
+
 import mocks
 import luddcam
 import luddcam_settings
@@ -59,9 +61,13 @@ def expect_images(n, retries=10):
         return expect_images(n, retries=retries-1)
     assert got == n, f"expected {n} fits files, got {got}"
 
-def snap(name, tolerance=10, retries=5):
+def snap(name, tolerance=10, retries=5, epaper=False):
     f = f"test_data/{mocks.test_mode}/assertions/{name}.png"
-    current = pygame.display.get_surface().copy()
+    if epaper:
+        image = mocks.epd_buf.convert("RGB")
+        current = pygame.image.fromstring(image.tobytes(), image.size, 'RGB')
+    else:
+        current = pygame.display.get_surface().copy()
 
     if not os.path.exists(f):
         pygame.image.save(current, f)
@@ -73,7 +79,7 @@ def snap(name, tolerance=10, retries=5):
                 # exact timing is flakey, this buys us some runway
                 print("FAILED screenshot test with retry")
                 nothing(1)
-                return snap(name, tolerance, retries=retries-1)
+                return snap(name, tolerance, retries-1, epaper)
 
             ff = f"test_data/{mocks.test_mode}/failures/{name}.png"
             pygame.image.save(current, ff)

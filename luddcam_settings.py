@@ -67,6 +67,7 @@ FRAME_OPTIONS = [4, 6, 10, 12, 20, 25, 30, 50, 60, 100, 120, 1000]
 # may want to move this to the media or user home dir at some point
 SETTINGS_FILE = "luddcam-settings.json"
 
+# TODO higher contrast would be better for epaper
 THEME = pygame_menu.themes.THEME_DARK
 if (hack := pygame.font.match_font('hack')):
     THEME.title_font = hack
