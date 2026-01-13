@@ -8,6 +8,22 @@ On Raspberry pi you want to be using the linux-image-6.12.25 version of the kern
 
 ```
 sudo apt install --reinstall linux-image-6.12.25+rpt-rpi-v8
+sudo cp /boot/vmlinuz-6.12.25+rpt-rpi-v8 /boot/firmware/kernel-stable.img
+sudo cp /boot/initrd.img-6.12.25+rpt-rpi-v8 /boot/firmware/initramfs-stable
+```
+
+then edit `/boot/firmware/config.txt` to have this line
+
+```
+kernel=kernel-stable.img
+```
+
+and reboot. To go back to the mainline kernel, simply remove that `kernel=` line and reboot. Remove the older kernel entirely with
+
+```
+sudo apt remove linux-image-6.12.25+rpt-rpi-v8
+sudo rm /boot/firmware/kernel-stable.img
+sudo rm /boot/firmware/initramfs-stable
 ```
 
 If you need to rebuild your kernel on Debian, follow these instructions:

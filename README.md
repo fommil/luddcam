@@ -17,35 +17,44 @@ Luddcam is designed to look and feel like a DSLR and requires a gamepad controll
 - `A` is the primary action
 - `B` is the secondary action
 
-When Luddcam starts up, it drops into the menu allowing selection of the camera (or filter wheel if you have one)
+When Luddcam starts up, it drops into the menu allowing selection of the camera (or filter wheel if you have one). Left is what you see with an LCD screen, right if you have e-Paper:
 
-<p align="center"><img src="./test_data/sony_a7iii/m31/assertions/settings_1.png" width="30%"></p>
+<p align="center">
+<img src="./test_data/osc/assertions/settings_1.png" width="30%">
+<img src="./test_data/osc/assertions/settings_1e.png" width="30%">
+</p>
 
 The direction buttons work as expected with up/down to select a menu entry and left/right to change it. Left/right is used to go through all the menus, e.g. to change the exposure length (with quick buttons for bias/flats/dso) and gain
 
-<p align="center"><img src="./test_data/sony_a7iii/m31/assertions/settings_3.png" width="30%"></p>
+<p align="center"><img src="./test_data/osc/assertions/settings_3.png" width="30%"></p>
 
 or to label the filter wheel positions and create interval plans.
 
 When finished with the menu, press `SELECT` to go to the capture view, which will be `LIVE` by default (capped to a few seconds maximum exposure). To return to the menu at any moment, press `SELECT`.
 
-<p align="center"><img src="./test_data/sony_a7iii/m31/assertions/live_capture.png" width="30%"></p>
+<p align="center">
+<img src="./test_data/osc/assertions/live_capture.png" width="30%">
+<img src="./test_data/osc/assertions/live_capture_e.png" width="30%">
+</p>
 
  `A` can be used to zoom in to the central region which is excellent for focussing or mount star alignment.
 
-<p align="center"><img src="./test_data/sony_a7iii/m31/assertions/live_zoom.png" width="30%"></p>
+<p align="center">
+<img src="./test_data/osc/assertions/live_zoom.png" width="30%">
+<img src="./test_data/osc/assertions/live_zoom_e.png" width="30%">
+</p>
 
 To take a single shot, press `START` (the shutter). It will remain on the screen until you press `B`, going back to `LIVE` mode, `A` to zoom, or `START` to take another capture.
 
 Some useful information is shown on screen such as your exposure, file name, gain and position in the sequence. The preview is automatically stretched with arcsinh to make it easier to frame the shot.
 
-<p align="center"><img src="./test_data/sony_a7iii/m31/assertions/capture_repeat_done.png" width="30%"></p>
+<p align="center"><img src="./test_data/osc/assertions/capture_repeat_done.png" width="30%"></p>
 
 Histograms use a logarithm scale and are calculated across all the raw image pixels in their full bit depth. Also included is a count of saturated pixels (your hot pixels forever haunting you). Single shot mode is a great way to make sure you've dialled in your exposure lengths and gain.
 
 Once you're ready to start your session, press `B` to get back into `LIVE` mode, then `B` again to get a choice of `SINGLE` / `REPEAT` / `INTERVAL` modes.
 
-All files are saved as (uncompressed) fits files and are flushed to disk, so once it says `SAVED` on the screen, even a dead battery won't ruin your night. A DSLR style naming convention is used so that processing follows your standard workflow and all the fits headers you'd expect to see are there.
+All files are saved as (uncompressed) fits files and are flushed to disk, so once it says `SAVED` on the screen, it's physically on the drive. A DSLR style naming convention is used so that processing follows your standard workflow and all the fits headers you'd expect to see are there.
 
 Once you've started the session with the shutter `START` button, every image will appear on the screen as it is captured. `SELECT` (which goes to the menu) will cancel the session. `START` will pause a session.
 
@@ -97,6 +106,8 @@ sudo raspi-config
 
 This is not a generic output device so on reboot don't expect to see the login console.
 
+I'm able to get a little over 3 hours (on an rpi 4b and imx715 planetary camera taking 10 second exposures) with a 5amp / 120g usb power bank, and over 12 hours with a larger 20amp / 250g bank, drawing 0.9A with the screensaver on. It draws 1.0A if the screen is left running.
+
 ## DSI
 
 If you installed the screen by plugging in an incredibly fiddly cable, enable DSI with:
@@ -108,7 +119,7 @@ Add the following entry in `/boot/firmware/config.txt` is all that is needed:
 dtoverlay=vc4-kms-dsi-waveshare-panel,4_3_inch
 ```
 
-Unfortunately the backlight cannot be turned off entirely, but we try to dim it as much as possible. I think this might be the biggest contributor to power usage; I'm able to get about 3 hours on a planetary camera taking 10 second exposures with a 5amp / 120g usb power bank, and almost 12 hours with a larger 20amp / 250g bank.
+Unfortunately the backlight cannot be turned off entirely, but we try to dim it as much as possible. I'm able to get about 3 hours (on an rpi 4b and imx715 planetary camera taking 10 second exposures) with a 5amp / 120g usb power bank, and almost 12 hours with a larger 20amp / 250g bank, drawing 1.0A with the screensaver on (i.e. dimmed). It draws 1.1A if the screen is left on.
 
 # Installation
 
@@ -145,7 +156,7 @@ then turn it off and on again. You should see luddcam!
 
 ### Beta
 
-- e-paper
+- e-paper ✅
 - playback
 - plate solving
 - polar alignment

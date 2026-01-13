@@ -1009,9 +1009,9 @@ if __name__ == "__main__":
 
     exp = 10.0
     # 3 minute dual band exposure
-    f = "test_data/sony_a7iii/m31/exposures/10.fit.fz"
+    f = "test_data/osc/exposures/10.fit.fz"
     # actually a 30 second rgb exposure
-    # f = "test_data/sony_a7iii/m31/exposures/1.fit.fz"
+    # f = "test_data/osc/exposures/1.fit.fz"
     # sony a7iii is RGGB
 
     h = fitsio.FITS(f)[1].read_header()

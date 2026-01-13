@@ -137,7 +137,7 @@ def run():
 
 if __name__ == '__main__':
     # make this an input parameter, have many tests
-    mocks.test_mode = "sony_a7iii/m31"
+    mocks.test_mode = "osc"
     mocks.warp = 4.0
 
     if os.path.exists(luddcam_settings.SETTINGS_FILE):

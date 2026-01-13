@@ -67,8 +67,19 @@ FRAME_OPTIONS = [4, 6, 10, 12, 20, 25, 30, 50, 60, 100, 120, 1000]
 # may want to move this to the media or user home dir at some point
 SETTINGS_FILE = "luddcam-settings.json"
 
-# TODO higher contrast would be better for epaper
-THEME = pygame_menu.themes.THEME_DARK
+# based on THEME_DARK
+THEME = pygame_menu.Theme(
+    background_color=(0, 0, 0), # high contrast
+    cursor_color=(255, 255, 255),
+    cursor_selection_color=(80, 80, 80, 120),
+    scrollbar_color=(39, 41, 42),
+    scrollbar_slider_color=(65, 66, 67),
+    scrollbar_slider_hover_color=(90, 89, 88),
+    selection_color=(255, 255, 255),
+    title_background_color=(47, 48, 51),
+    title_font_color=(215, 215, 215),
+    widget_font_color=(200, 200, 200)
+)
 if (hack := pygame.font.match_font('hack')):
     THEME.title_font = hack
     THEME.widget_font = hack

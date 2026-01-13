@@ -114,7 +114,7 @@ class AsyncEpd:
             item = self.queue.get()
             if item is None:
                 return
-            print(f"e-Paper running {item[0]}")
+            # print(f"e-Paper running {item[0]}")
             match item[0]:
                 case "init":
                     self.epd.init()
