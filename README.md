@@ -1,4 +1,4 @@
-**Luddcam** is a minimalist astrophotography control system. Designed for a Raspberry Pi with a screen and controller, it brings the feel of a classic DSLR to your astrocamera.
+**Luddcam** is a minimalist astrophotography control system. Designed for a Raspberry Pi with an LCD or ePaper screen and game controller, it brings the feel of a classic DSLR to your astrocamera.
 
 Luddcam requires you to be physically present: polar aligning through a scope, focusing, framing your shot, checking your histograms, pressing the shutter, waiting patiently to see how it comes out. It's not about convenience or performance, it's about connection.
 
@@ -17,7 +17,7 @@ Luddcam is designed to look and feel like a DSLR and requires a gamepad controll
 - `A` is the primary action
 - `B` is the secondary action
 
-When Luddcam starts up, it drops into the menu allowing selection of the camera (or filter wheel if you have one). Left is what you see with an LCD screen, right if you have e-Paper:
+When Luddcam starts up, it drops into the menu allowing selection of the camera (or filter wheel if you have one). Left is what you see with an LCD screen, right if you have e-Paper (and are saving your night vision from attack):
 
 <p align="center">
 <img src="./test_data/osc/assertions/settings_1.png" width="30%">
