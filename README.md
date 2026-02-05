@@ -66,7 +66,7 @@ Caveat: Luddcam currently only works with ZWO / Touptek cameras, ZWO filter whee
 
 It is designed to run on a [Raspberry Pi 4b](https://thepihut.com/products/raspberry-pi-starter-kit?variant=20336446079038), but should run on anything more recent. I test with 4GB of RAM but it might work with 1GB / 2GB.
 
-I recommend the [WaveShare 4.26" e-Paper](https://www.waveshare.com/wiki/4.26inch_e-Paper_HAT_Manual) or [WaveShare 4.3" LCD screen](https://thepihut.com/products/4-3-dsi-capacitive-touchscreen-display-for-raspberry-pi-800x480) ([the Amazon version includes a case](https://www.amazon.co.uk/dp/B09B29T8YF)) and [NES gamepad](https://thepihut.com/products/nes-style-raspberry-pi-compatible-usb-gamepad-controller) or [Waveshare Game HAT](https://www.amazon.co.uk/dp/B07G57BC3R). In total this should be just over $100.
+I recommend the [WaveShare 4.26" e-Paper](https://www.waveshare.com/wiki/4.26inch_e-Paper_HAT_Manual) (with a [Pibow Coupe](https://thepihut.com/products/pibow-4-coupe-case-for-raspberry-pi-4b) to protect from touching the electronics) or [WaveShare 4.3" LCD screen](https://thepihut.com/products/4-3-dsi-capacitive-touchscreen-display-for-raspberry-pi-800x480) ([the Amazon version includes a case](https://www.amazon.co.uk/dp/B09B29T8YF)) and [NES gamepad](https://thepihut.com/products/nes-style-raspberry-pi-compatible-usb-gamepad-controller) or [Waveshare Game HAT](https://www.amazon.co.uk/dp/B07G57BC3R). In total this should be just over $100.
 
 After physically attaching the screen to the pi, follow these instructions to get a stock raspberry pi up and running with a microsd:
 

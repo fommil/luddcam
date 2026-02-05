@@ -123,7 +123,10 @@ class Camera:
             # print("got an image")
             w, h = self.c.get_Size()
             self.img = np.frombuffer(buf, dtype=np.uint16).reshape(h, w)
-
+            # the whole buffer is flipped for (at least) this model
+            # and put_{H,V}Flip doesn't do anything.
+            if self.name == "G3M715C":
+                self.img = np.flip(self.img)
         except Exception as ex:
             print(f"touptek pullimage failed due to {ex}")
             self.img = None

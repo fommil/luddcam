@@ -11,9 +11,7 @@
 #
 # Discussion here about Siril header requirements:
 # https://discuss.pixls.us/t/formats-and-headers-supported-required-by-siril/50531
-#
-# TODO X/Y and L/R on a SNES controller could be used for gain / exposure.
-# TODO DOWN is free, we could use it for plate solving
+
 
 from datetime import datetime, timezone
 from enum import Enum
@@ -36,6 +34,8 @@ import pygame
 
 import pygame_menu
 
+import luddcam_astrometry
+import luddcam_catalog
 import luddcam_settings
 from luddcam_settings import is_back, is_left, is_right, is_up, is_down, is_start, is_action, is_button
 import mocks
@@ -75,6 +75,9 @@ class Capture:
         self.mode = mode
         self.stage = Stage.STOP
         self.interval_idx = None
+
+        self.plate_solve = False
+        self.polar_align = False
 
         self.thread = threading.Thread(target=self.run, daemon=True, name="Capture")
 
@@ -273,6 +276,8 @@ class Capture:
                                     ("STAGE", capture_stage),
                                     ("IMAGE_COUNT", image_count),
                                     ("SINGLE_EXPTIME", self.camera_settings.exposure),
+                                    ("PLATE_SOLVE", self.plate_solve),
+                                    ("POLAR_ALIGN", self.polar_align),
                                     ("INTERVAL_INFO", interval_info)]
             if capture_stage is Stage.LIVE:
                 self.view.set_data(None, data, metadata_)
@@ -507,21 +512,24 @@ class View:
 def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, saved):
     target_width, target_height = surface.get_size()
     #print(surface.get_size())
-    start = time.perf_counter()
+    #start = time.perf_counter()
     bayer = meta.get("BAYERPAT")
-    img_rgb = downscale(img_raw, target_width, target_height, zoom, bayer)
-    end = time.perf_counter()
-    #print(f"scaling for the screen took {end - start:.2f}")
+    # need some other conditions for plate solving
+    img_rgb, img_mono = downscale(img_raw, target_width, target_height, zoom, bayer, not zoom)
+
+    # FIXME plate solving
+    plate_solve = meta.get("PLATE_SOLVE")
+    polar_align = meta.get("POLAR_ALIGN")
+
+    #end = time.perf_counter()
+    # print(f"scaling for the screen took {end - start:.2f}")
+    img_rgb = quantize(img_rgb, meta["EXPTIME"] >= 0.1)
+
     #print(img_rgb.shape)
 
     # we calculate the full histogram later, but this quick approximation
     # is basically free and handles colour / zoom / fov.
 
-    if meta["EXPTIME"] >= 0.1:
-        # simple stretch for astro exposures
-        # (allows terrestrial use, e.g. daytime setup)
-        # print("stretching")
-        img_rgb = asinh_lut[img_rgb]
     # pygame expects (w,h,3) but everything else is (h,w,3)
     img_rgb = np.transpose(img_rgb, (1, 0, 2))
     # and it's also upside down compared to the rest of the world
@@ -617,6 +625,7 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
             surface.blit(text, rect)
 
 class Menu:
+    # TODO plate solving state should probably be remembered too
     def __init__(self, epaper, output_dir, camera, camera_settings, wheel, wheel_settings, mode):
         if not mode or (mode is Mode.INTERVALS and not camera_settings.intervals):
             mode = Mode.SINGLE
@@ -628,9 +637,10 @@ class Menu:
         self.epaper = epaper
         self.view = View(w, h)
         self.zoom = False # used to capture BACK
+
+        self.menu = None
         if not camera:
             self.capture = None
-            self.menu = None
             self.view.message("no camera")
             return
 
@@ -639,23 +649,47 @@ class Menu:
 
         self.screensaver = False
 
-        self.menu = luddcam_settings.mk_menu("Capture")
-        self.menu_active = False
-
+    def mk_secondary_action_menu(self):
+        menu = luddcam_settings.mk_menu("Capture")
+        # A design choice is to put all these things in the second
+        # action menu. We might want to allow UP/DOWN (or X/Y)
+        # shortcuts one day.
         def select_mode(a, mode):
             print(f"setting mode to {mode}")
             self.capture.set_mode(mode)
 
         items = [("Single", Mode.SINGLE), ("Repeat", Mode.REPEAT)]
-        if camera_settings.intervals:
+        if self.capture.camera_settings.intervals:
             items.append(("Intervals", Mode.INTERVALS))
 
-        self.menu.add.selector(
+        menu.add.selector(
             "Mode: ",
             items=items,
-            default=mode.value,
+            default=self.capture.mode.value,
             onchange=select_mode,
             align=ALIGN_LEFT)
+
+        def select_plate_solve(a):
+            print(f"toggling plate solving, got {a}")
+            self.capture.plate_solve = a
+        menu.add.toggle_switch(
+            "Plate Solving",
+            self.capture.plate_solve,
+            state_text=('Off', 'Live'),
+            onchange=select_plate_solve,
+            align=ALIGN_LEFT)
+
+        def select_polar_align(a):
+            print(f"toggling polar alignment, got {a}")
+            self.capture.polar_align = True
+        menu.add.toggle_switch(
+            "Polar Align",
+            self.capture.polar_align,
+            state_text=('Off', 'Live'),
+            onchange=select_polar_align,
+            align=ALIGN_LEFT)
+
+        return menu
 
     def get_mode(self):
         if self.capture:
@@ -675,10 +709,11 @@ class Menu:
             self.view.blit(screen)
             return
 
-        if self.menu_active:
+        if self.menu:
             for event in events:
-                if is_action(event) or is_back(event):
-                    self.menu_active = False
+                if is_back(event):
+                    self.menu = None
+                    return
 
             self.menu.update(events)
             self.menu.draw(screen)
@@ -707,7 +742,7 @@ class Menu:
                 if stage == Stage.PAUSE:
                     self.capture.set_stage(Stage.LIVE)
                 elif stage == Stage.LIVE:
-                    self.menu_active = True
+                    self.menu = self.mk_secondary_action_menu()
                 else:
                     # back is now screensaver
                     self.screensaver = True
@@ -728,13 +763,15 @@ class Menu:
         if not self.screensaver:
             self.view.blit(screen)
 
-# zoom means to crop to the target size
-def downscale(mono, target_width, target_height, zoom, bayer):
+# Downscales the (bayered) image into the target width/height (possibly padding)
+# returning an rgb image (retaining the original bittype) and an (optional)
+# float32 mono variant.
+#
+# zoom means to crop to the target size (uses higher quality debayer)
+def downscale(mono, target_width, target_height, zoom, bayer, gray):
     height, width = mono.shape
     if target_height > height or target_width > width:
         raise ValueError(f"downscale doesn't upscale ({mono.shape} => ({h},{w}))")
-
-    #print(f"CAPTURE: {mono.shape}")
 
     # this can be surprisingly computationally expensive if we are not careful,
     # so we aim for speed above quality.
@@ -752,34 +789,45 @@ def downscale(mono, target_width, target_height, zoom, bayer):
     # we always have to be mindful of resizing mono data to even numbers to
     # preserve the bayer pattern.
 
-    s = 2 if bayer else 1
     if zoom:
         height, width = mono.shape
-        startx = even_down(width // 2 - s * target_width // 2)
-        starty = even_down(height // 2 - s * target_height // 2)
-        mono = mono[starty:starty + s*target_height, startx:startx + s*target_width]
-        #print(f"DOWNSAMPLE: image is now {mono.shape}")
+        startx = even_down(width // 2 - target_width // 2)
+        starty = even_down(height // 2 - target_height // 2)
+        channels = mono[starty:starty + target_height, startx:startx + target_width]
+        if bayer:
+            # doesn't downsample
+            channels = debayer_quality(channels, bayer)
+
     else:
-        mono = down_sample_mono(mono, bayer, target_width, target_height)
-        #print(f"DOWNSAMPLE: image is now {mono.shape}")
-        mono = pad_to_aspect(mono, bayer, target_width, target_height)
-        #print(f"LETTERBOX: image is now {mono.shape}")
+        channels = down_sample_mono(mono, bayer, target_width, target_height)
+        channels = pad_to_aspect(channels, bayer, target_width, target_height)
+        if bayer:
+            # downsamples
+            channels = debayer_fast(channels, bayer)
 
-    #print(f"CROPPED: {mono.shape}")
+    channels = resize_nn(channels, target_width, target_height)
 
-    # now debayer and downscale by slicing, then crop again
+    grayscale = None
     if bayer:
-        channels = debayer(mono, bayer)
-        # print(f"BEBAYERED: {channels.shape}")
+        if gray:
+            grayscale = channels @ np.array([0.299, 0.587, 0.114])
+        return (channels, grayscale)
     else:
-        channels = mono
+        if gray:
+            grayscale = channels.astype(np.float32)
+        return (np.stack([channels] * 3, axis=-1), grayscale)
 
+# quantizes an image to 8 bits with astro specific noise/saturation
+# or an optional asinh stretch.
+def quantize(img, stretch):
     # now quantise to 8 bits
-    if channels.dtype == np.uint8:
-        channels_8 = channels
+    if img.dtype == np.uint8:
+        if stretch:
+            return asinh_lut_8[img]
+        return img
     else:
         # start = time.perf_counter()
-        sampled = channels[::2, ::2] # speeds things up
+        sampled = img[::2, ::2] # speeds things up
         sampled = sampled[sampled > 0] # ignores letterboxing
         # faster ways to calculate bounds, more generic
         #lo = np.min(sampled)
@@ -791,23 +839,18 @@ def downscale(mono, target_width, target_height, zoom, bayer):
         # print(f"finding the quantization parameters took {end - start:.2f} ")
         # print(f"lo={lo},hi={hi}")
         if lo < hi:
-            m = 255.0 / (hi - lo)
-            # we need to go to 32 bit to handle negative values.
-            #
-            # we tould do something like apply a mask to channels to remove the
-            # values that would wrap around and avoid recreating.
-            channels_8 = ((channels.astype(np.int32) - lo) * m).clip(0, 255).astype(np.uint8)
+            if stretch:
+                # keep everything in 16 bit as long as possible
+                m = 65535.0 / (hi - lo)
+                img = ((img.astype(np.int32) - lo) * m).clip(0, 65535).astype(int)
+                return asinh_lut_16[img]
+            else:
+                m = 255.0 / (hi - lo)
+                return ((img.astype(np.int32) - lo) * m).clip(0, 255).astype(np.uint8)
         else:
-            channels_8 = (channels >> 8).astype(np.uint8)
-
-    #channels_8 = resize_nn(channels_8, target_width, target_height)
-    channels_8 = resize_nn_pillow(channels_8, target_width, target_height)
-    # print(f"RESIZED: {channels_8.shape}")
-
-    if bayer:
-        return channels_8
-    else:
-        return np.stack([channels_8] * 3, axis=-1)
+            if stretch:
+                return asinh_lut_16[img]
+            return (img >> 8).astype(np.uint8)
 
 # the nearest even, rounding up
 def even_up(i):
@@ -827,12 +870,7 @@ def resize_nn(img, tw, th):
     ys = ((np.arange(th) + 0.5) * scale_y - 0.5).astype(int)
     xs = np.clip(xs, 0, w - 1)
     ys = np.clip(ys, 0, h - 1)
-    return img[ys[:, None], xs[None, :]]
-
-def resize_nn_pillow(img, tw, th):
-    pil = Image.fromarray(img)
-    resized = pil.resize((tw, th), Image.NEAREST)
-    return np.array(resized, dtype=img.dtype)
+    return img[np.ix_(ys, xs)]  # handles arbitrary dimensions
 
 def crop_to_aspect(mono, bayer, target_width, target_height):
     height, width = mono.shape
@@ -890,11 +928,10 @@ def down_sample_mono(mono, bayer, target_width, target_height):
             mono = blk.reshape(ys * 2, xs * 2)
     return mono
 
-# debayer the mono image using the given pattern, using fast downsampling.
-#
-# debayering algorithms that aim for quality rather than performance keep the
-# original image size and fill in missing pixels by averaging in each channel.
-def debayer(data, bayer):
+# debayer the mono image using the given pattern, using fast downsampling
+# that reduces the resolution of the returned image and only using one green
+# pixel in every block.
+def debayer_fast(data, bayer):
     # print(f"debayering an {data.shape} image with {bayer} pattern")
     h, w = data.shape
     if h % 2 or w % 2:
@@ -907,24 +944,18 @@ def debayer(data, bayer):
     #bl = data[1::2, 0::2]
     #br = data[1::2, 1::2]
 
-    # def avg(a, c):
-    #     return ((a.astype(np.uint16) + c.astype(np.uint16)) >> 1).astype(dt)
-
-    # pick one of the greens and throw the other away for perf
+    # pick one of the greens and throw the other away for perf,
+    # saves constructing an array and a merge.
     if bayer == "RGGB":
-        #R, G, B = tl, avg(tr, bl), br
         br = data[1::2, 1::2]
         R, G, B = tl, tr, br
     elif bayer == "BGGR":
-        # R, G, B = br, avg(tr, bl), tl
         br = data[1::2, 1::2]
         R, G, B = br, tr, tl
     elif bayer == "GRBG":
-        # R, G, B = tr, avg(tl, br), bl
         bl = data[1::2, 0::2]
         R, G, B = tr, tl, bl
     elif bayer == "GBRG":
-        # R, G, B = bl, avg(tl, br), tr
         bl = data[1::2, 0::2]
         R, G, B = bl, tl, tr
     else:
@@ -932,12 +963,111 @@ def debayer(data, bayer):
 
     return np.stack((R, G, B), axis=-1)
 
-def lut_asinh(k):
+# like fast but uses a little more memory and uses all pixels
+def debayer_fastish(data, bayer):
+    # print(f"debayering an {data.shape} image with {bayer} pattern")
+    h, w = data.shape
+    if h % 2 or w % 2:
+        raise ValueError(f"debayer_simple expects even dimensions (got {h},{w})")
+
+    dt = data.dtype
+
+    tl = data[0::2, 0::2]
+    tr = data[0::2, 1::2]
+    bl = data[1::2, 0::2]
+    br = data[1::2, 1::2]
+
+    def avg(a, b):
+        return np.mean([a, b], axis=0).round().astype(data.dtype)
+
+    if bayer == "RGGB":
+        R, G, B = tl, avg(tr, bl), br
+    elif bayer == "BGGR":
+        R, G, B = br, avg(tr, bl), tl
+    elif bayer == "GRBG":
+        R, G, B = tr, avg(tl, br), bl
+    elif bayer == "GBRG":
+        R, G, B = bl, avg(tl, br), tr
+    else:
+        raise ValueError(f"Unsupported Bayer pattern: {bayer}")
+
+    return np.stack([R, G, B], axis=-1)
+
+# slower debayer (higher memory usage) that retains the original resolution by
+# interpolating pixels. This is best for OSC guide cameras (after grayscaling)
+# so that we get the best possible centroids.
+def debayer_quality(data, bayer):
+    # print(f"debayering an {data.shape} image with {bayer} pattern")
+    h, w = data.shape
+    if h % 2 or w % 2:
+        raise ValueError(f"debayer_simple expects even dimensions (got {h},{w})")
+
+    r_mask = np.zeros(data.shape, dtype=bool)
+    g_mask = np.zeros(data.shape, dtype=bool)
+    b_mask = np.zeros(data.shape, dtype=bool)
+
+    # tl = data[0::2, 0::2]
+    # tr = data[0::2, 1::2]
+    # bl = data[1::2, 0::2]
+    # br = data[1::2, 1::2]
+    if bayer == "RGGB":
+        r_mask[0::2, 0::2] = True
+        g_mask[0::2, 1::2] = True
+        g_mask[1::2, 0::2] = True
+        b_mask[1::2, 1::2] = True
+    elif bayer == "BGGR":
+        b_mask[0::2, 0::2] = True
+        g_mask[0::2, 1::2] = True
+        g_mask[1::2, 0::2] = True
+        r_mask[1::2, 1::2] = True
+    elif bayer == "GRBG":
+        g_mask[0::2, 0::2] = True
+        r_mask[0::2, 1::2] = True
+        b_mask[1::2, 0::2] = True
+        g_mask[1::2, 1::2] = True
+    elif bayer == "GBRG":
+        g_mask[0::2, 0::2] = True
+        b_mask[0::2, 1::2] = True
+        r_mask[1::2, 0::2] = True
+        g_mask[1::2, 1::2] = True
+    else:
+        raise ValueError(f"Unsupported Bayer pattern: {bayer}")
+
+    # we allocate a temporary channel that is padded (to handle the edges) with
+    # NaNs where there is no data for that channel. Then we convolve taking the
+    # center pixel if there is data, otherwise the average of all non-NaN
+    # values. Unfortunately this is eager, no way to do this lazily in numpy.
+    def interpolate(mask):
+        # so many intermediate arrays, le sigh
+        c = np.full((h + 2, w + 2), np.nan, dtype=np.float32)
+        c[1:-1, 1:-1][mask] = data[mask]
+        centre = c[1:-1, 1:-1]
+        averaged = np.nanmean([
+            c[ :-2, :-2], c[ :-2, 1:-1], c[ :-2, 2:],
+            c[1:-1, :-2], c[1:-1, 1:-1], c[1:-1, 2:],
+            c[2:  , :-2], c[2:  , 1:-1], c[2:  , 2:]
+        ], axis=0)
+        return np.where(np.isnan(centre), averaged, centre).round().astype(data.dtype)
+
+    r = interpolate(r_mask)
+    g = interpolate(g_mask)
+    b = interpolate(b_mask)
+    # print(f"input was {data.shape}, r={r.shape}, g={g.shape}, b={b.shape}")
+
+    return np.stack([r, g, b], axis=-1)
+
+def lut_asinh_8(k):
     x = np.linspace(0, 1, 256)
     y = np.arcsinh(k * x) / np.arcsinh(k)
-    return (y * 255).astype(np.uint8)
+    return (y * 255 + 0.5).astype(np.uint8)
+asinh_lut_8 = lut_asinh_8(15)
 
-asinh_lut = lut_asinh(15)
+# quantizes 16 bit input to stretched 8 bit
+def lut_asinh_16(k):
+    x = np.linspace(0, 1, 65536)
+    y = np.arcsinh(k * x) / np.arcsinh(k)
+    return (y * 255 + 0.5).astype(np.uint8)
+asinh_lut_16 = lut_asinh_16(15)
 
 # returns a tuple of normalised histogram weights and the absolute count of
 # saturated pixels. Log scale.
@@ -1056,4 +1186,8 @@ if __name__ == "__main__":
     pygame.image.save(surface, "test.png")
     # Image.fromarray(out).save("test.png")
 
-    subprocess.Popen(["feh", "test.png"], start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.Popen(["feh", "--force-aliasing", "test.png"], start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+# Local Variables:
+# compile-command: "python3 luddcam_capture.py"
+# End:

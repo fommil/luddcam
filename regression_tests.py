@@ -88,7 +88,7 @@ def snap(name, tolerance=10, retries=5, epaper=False):
             fff = f"test_data/{mocks.test_mode}/failures/{name}_diffs.png"
             # unfortunately this saves the most recent one, so can be fiddly
             pygame.image.save(diffs, fff)
-            subprocess.Popen(["feh", fff], start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.Popen(["feh", "--force-aliasing", fff], start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             raise AssertionError(f"image mismatch {f}: max diff {diff:.2f}")
 
 # This is intended to be used to account for anti-aliasing
