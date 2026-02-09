@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from fractions import Fraction
 from pathlib import Path
+import math
 import os
 import pathlib
 import re
@@ -41,6 +42,8 @@ from luddcam_settings import is_back, is_left, is_right, is_up, is_down, is_star
 import mocks
 
 ALIGN_LEFT=pygame_menu.locals.ALIGN_LEFT
+
+WHITE=(255, 255, 255)
 
 class Mode(Enum):
     SINGLE = 0
@@ -265,7 +268,7 @@ class Capture:
                 filt = None
             else:
                 filt = self.wheel_settings.filters[capture_slot] or f"Slot {capture_slot + 1}"
-            metadata = mk_metadata(capture_exposure, self.camera, filt, self.camera_settings.cooling)
+            metadata = mk_metadata(capture_exposure, self.camera, filt, self.camera_settings.cooling, self.view.get_plate())
             # some extra info for the view, might go unused but it could be useful
             interval_info = ""
             if capture_interval_idx:
@@ -302,7 +305,7 @@ class Capture:
 
         print(f"capture stopped for {self.camera.name}")
 
-def mk_metadata(exp, camera, filt = None, cooling = None):
+def mk_metadata(exp, camera, filt, cooling, plate):
     # note that fitsio seems to automatically set BZERO and BSCALE
     metadata = []
     metadata.append(("PROGRAM", "luddcam"))
@@ -328,6 +331,17 @@ def mk_metadata(exp, camera, filt = None, cooling = None):
         # https://siril.readthedocs.io/en/stable/file-formats/FITS.html#orientation-of-fits-images
         metadata.append(("BAYERPAT", camera.bayer))
         metadata.append(("ROWORDER", "BOTTOM-UP"))
+
+    # these are pulled from the last known good solve
+    # so may be inaccurate and delayed, but when it
+    # works its a decent hint to siril.
+    ra, dec, focal_length = plate
+    if ra is not None:
+        metadata.append(("RA", ra))
+    if dec is not None:
+        metadata.append(("DEC", dec))
+    if focal_length is not None:
+        metadata.append(("FOCALLEN", focal_length))
 
     return metadata
 
@@ -429,8 +443,19 @@ class View:
         self.is_paused = False
         self.saved = False
 
+        # plate solving hints
+        self.ra_center = None
+        self.dec_center = None
+        self.pixscale = None
+        self.parity = None
+        self.focal_length = None
+
         self.font_large = pygame.font.Font(luddcam_settings.hack, 32)
         self.font_small = pygame.font.Font(luddcam_settings.hack, 14)
+
+    def get_plate(self):
+        with self.lock:
+            return (self.ra_center, self.dec_center, self.focal_length)
 
     # Callable by the UI thread, enables or disables digital zoom.
     def toggle_zoom(self):
@@ -472,12 +497,19 @@ class View:
         if isinstance(img_raw, str) or img_raw is None:
             surface.fill((0, 0, 0))
             if img_raw:
-                text = self.font_large.render(img_raw, True, (255, 255, 255))
+                text = self.font_large.render(img_raw, True, WHITE)
                 rect = text.get_rect(center=(surface.get_width()//2, surface.get_height()//2))
                 surface.blit(text, rect)
         else:
             is_saved = saved == out
-            render_frame_for_screen(surface, img_raw, zoom, meta, out, self.font_small, is_paused, is_saved)
+            ra_center, dec_center, pixscale, parity, focal_length = render_frame_for_screen(
+                surface, img_raw, zoom, meta, out, self.font_small, is_paused, is_saved,
+                self.ra_center, self.dec_center, self.pixscale, self.parity)
+
+            # only update the hints if we got a successful plate solve.
+            # focal_length isn't reused as a hint
+            if None not in (ra_center, dec_center, pixscale, parity):
+                self.ra_center, self.dec_center, self.pixscale, self.parity, self.focal_length = ra_center, dec_center, pixscale, parity, focal_length
 
     def message(self, msg):
         self.set_data(None, msg, None)
@@ -508,34 +540,97 @@ class View:
             self.saved = out
             self.stale = True
 
-# moved out for easier manual testing
-def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, saved):
+# moved out for easier manual testing, returns a tuple containing the plate
+# solution hints for follow ups.
+#
+# note that the pixscale is after downsampling, so can't be used to calculate
+# the focal length.
+def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, saved, ra_center=None, dec_center=None, pixscale=None, parity=None):
+    raw_height, raw_width = img_raw.shape
     target_width, target_height = surface.get_size()
-    #print(surface.get_size())
-    #start = time.perf_counter()
+
+    mode = meta["MODE"]
+    stage = meta["STAGE"]
+
+    plate_solve = meta.get("PLATE_SOLVE") and not zoom
+    relevant_stars = None
+    relevant_dsos = None
+    polar_align = meta.get("POLAR_ALIGN") and not zoom
+    polar_alignment_points = None
+    focal_length = None
+
+    solve_field = (plate_solve or polar_align) and ((mode == Mode.SINGLE and saved) or stage == Stage.LIVE)
+
+    start = time.perf_counter()
     bayer = meta.get("BAYERPAT")
     # need some other conditions for plate solving
-    img_rgb, img_mono = downscale(img_raw, target_width, target_height, zoom, bayer, not zoom)
+    img_rgb, img_mono = downscale(img_raw, target_width, target_height, zoom, bayer, solve_field)
+    height, width, _ = img_rgb.shape
+    print(f"width = {width}, height = {height}")
+    end = time.perf_counter()
+    print(f"downscale took {end - start}")
 
-    # FIXME plate solving
-    plate_solve = meta.get("PLATE_SOLVE")
-    polar_align = meta.get("POLAR_ALIGN")
+    # plate solving is relatively expensive and it might seem silly to do it
+    # here and block this thread, but it is the only way to do it in a way
+    # that looks good to the user. We could consider doing a basic centroid
+    # conversion and reuse the last solution to save some cycles, or look
+    # into having a hot server wrapper over solve-field if it's a problem.
+    if solve_field:
+        scale_factor = raw_height / height
+        centroids = luddcam_astrometry.source_extract(img_mono)
 
-    #end = time.perf_counter()
-    # print(f"scaling for the screen took {end - start:.2f}")
+        if len(centroids) > 10:
+            with luddcam_astrometry.Astrometry() as solver:
+                bounds = solver.solve_field(centroids, width, height, (ra_center, dec_center), pixscale, parity)
+                if not bounds and (pixscale or parity):
+                    bounds = solver.solve_field(centroids, width, height, None, pixscale, parity)
+                # if plate solving failed maybe we could try again with the full image just
+                # to get a starting point
+                if bounds:
+                    #print(bounds)
+                    ra_min = bounds["ramin"]
+                    ra_max = bounds["ramax"]
+                    ra_center = bounds["ra_center"]
+                    dec_min = bounds["decmin"]
+                    dec_max = bounds["decmax"]
+                    dec_center = bounds["dec_center"]
+                    pixscale = bounds["pixscale"]
+                    parity = bounds["parity"]
+                    print(f"plate solved at {ra_center},{dec_center} scale {pixscale}")
+
+                    if pixel_size := meta.get("XPIXSZ"):
+                        focal_length = round((scale_factor * pixel_size / pixscale) * 206.265)
+                        # print(f"focal_length = {focal_length}")
+
+                    if polar_align:
+                        ras = [(ra, dec_center) for ra in np.linspace(ra_min, ra_max, 100)]
+                        polar_alignment_points = list(solver.radec_to_pixels(ras))
+
+                    if plate_solve:
+                        stars = luddcam_catalog.relevant_stars(dec_min, dec_max, ra_min, ra_max)
+                        dsos = luddcam_catalog.relevant_dsos(dec_min, dec_max, ra_min, ra_max)
+                        relevant_stars = solver.with_radec_to_pixels(stars)
+                        relevant_dsos = solver.with_radec_to_pixels(dsos)
+
     img_rgb = quantize(img_rgb, meta["EXPTIME"] >= 0.1)
-
-    #print(img_rgb.shape)
-
-    # we calculate the full histogram later, but this quick approximation
-    # is basically free and handles colour / zoom / fov.
 
     # pygame expects (w,h,3) but everything else is (h,w,3)
     img_rgb = np.transpose(img_rgb, (1, 0, 2))
-    # and it's also upside down compared to the rest of the world
-    #img_rgb = img_rgb[::-1, ::-1, :]
+    # prefer this for the image and any plate solving markup
+    img_surface = pygame.surfarray.make_surface(img_rgb)
 
-    pygame.surfarray.blit_array(surface, img_rgb)
+    if polar_alignment_points:
+        # FIXME highlight the point midway between where we were and the line, persist it
+        # (might need a button press to lock it in, another button to disable)
+        pygame.draw.lines(img_surface, WHITE, closed=False, points=polar_alignment_points, width=1)
+
+    if relevant_stars:
+        draw_stars(img_surface, relevant_stars, font)
+
+    # we could include the x/y offset here and allow the out-of-frame DSOs to be
+    # plotted outside the image, but that's a bit of a corner case. boom boom.
+    if relevant_dsos and pixscale:
+        draw_dsos(img_surface, relevant_dsos, pixscale, font)
 
     def tab(s):
         if len(s) == 0:
@@ -560,69 +655,150 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
             return s + prefix + str(v) + suffix
         return s
 
-    # potentially skip the histogram in live view too
-    if not zoom:
-        w, h = surface.get_size()
+    offset_v = (target_height - height) // 2
+    offset_h = (target_width - width) // 2
+    surface.fill((0,0,0,0))
+    surface.blit(img_surface, (offset_h, offset_v))
 
-        if (bitdepth := meta.get("BITDEPTH")):
-            width = 128
-            hist, saturated = histogram(img_raw, width, bitdepth)
-            render_histogram(surface, hist, saturated, font, 10, 10)
+    # zoom should be minimal, it's really just for fine focus / framing
+    if zoom:
+        return (None, None, None, None, None)
 
-        mode = meta["MODE"]
-        stage = meta["STAGE"]
-        top_left = ""
-        bottom_left = ""
-        if out:
-            top_left = tab(top_left) + pathlib.Path(out).name.split(".")[0]
+    # TODO visual feedback if plate solving failed
+    # TODO a graphical indicator that we are polar aligning
 
-        top_left = append_meta(top_left, "EXPTIME", suffix = "s")
-        top_left = append_meta(top_left, "GAIN", prefix=" ", suffix = "cB", align=False) # centibel = 0.1dB
-        top_left = append_meta(top_left, "FILTER", prefix=" ", align=False)
+    if (bitdepth := meta.get("BITDEPTH")):
+        width = 128
+        hist, saturated = histogram(img_raw, width, bitdepth)
+        render_histogram(surface, hist, saturated, font, 10, 10)
 
-        if stage == Stage.LIVE:
-            # TODO when it is live we should include info about the stage
-            # in the bottom left.
-            top_left = tab(top_left) + stage.name
+    top_left = ""
+    bottom_left = ""
+    if out:
+        top_left = tab(top_left) + pathlib.Path(out).name.split(".")[0]
+
+    top_left = append_meta(top_left, "EXPTIME", suffix = "s")
+    top_left = append_meta(top_left, "GAIN", prefix=" ", suffix = "cB", align=False) # centibel = 0.1dB
+    top_left = append_meta(top_left, "FILTER", prefix=" ", align=False)
+
+    if stage == Stage.LIVE:
+        # TODO when it is live we should include info about the stage
+        # in the bottom left.
+        top_left = tab(top_left) + stage.name
+    else:
+        top_left = tab(top_left) + mode.name
+        if mode != Mode.SINGLE:
+            # TODO when in interval it should be c/step_total of step/steps_total
+            # instead of infinity.
+            top_left = append_meta(top_left, "IMAGE_COUNT", prefix=" ", suffix="/∞", align=False)
+
+    top_left_text = font.render(top_left, True, WHITE)
+    top_left_rect = top_left_text.get_rect()
+    top_left_rect.topleft = (10, 10)
+    surface.blit(top_left_text, top_left_rect)
+
+    # bottom left should indicate what the shutter will do in LIVE
+    bottom_left = ""
+    if stage == Stage.LIVE:
+        bottom_left += "[" + mode.name
+        if mode is Mode.INTERVALS:
+            bottom_left = append_meta(bottom_left, "INTERVAL_INFO")
         else:
-            top_left = tab(top_left) + mode.name
-            if mode != Mode.SINGLE:
-                # TODO when in interval it should be c/step_total of step/steps_total
-                # instead of infinity.
-                top_left = append_meta(top_left, "IMAGE_COUNT", prefix=" ", suffix="/∞", align=False)
+            bottom_left = append_meta(bottom_left, "SINGLE_EXPTIME", suffix = "s")
+        bottom_left += "]"
 
-        top_left_text = font.render(top_left, True, (255, 255, 255))
-        top_left_rect = top_left_text.get_rect()
-        top_left_rect.topleft = (10, 10)
-        surface.blit(top_left_text, top_left_rect)
+    bottom_left_text = font.render(bottom_left, True, WHITE)
+    bottom_left_rect = bottom_left_text.get_rect()
+    bottom_left_rect.bottomleft = (10, target_height - 10)
+    surface.blit(bottom_left_text, bottom_left_rect)
 
-        # bottom left should indicate what the shutter will do in LIVE
-        bottom_left = ""
-        if stage == Stage.LIVE:
-            bottom_left += "[" + mode.name
-            if mode is Mode.INTERVALS:
-                bottom_left = append_meta(bottom_left, "INTERVAL_INFO")
+    # icons here might be nicer
+    top_right = ""
+    if saved:
+        top_right = tab(top_right) + "SAVED"
+    if paused:
+        top_right = tab(top_right) + "PAUSED"
+
+    if top_right:
+        text = font.render(top_right, True, WHITE)
+        rect = text.get_rect()
+        rect.topright = (target_width - 10, 10)
+        surface.blit(text, rect)
+
+    return (ra_center, dec_center, pixscale, parity, focal_length)
+
+def draw_stars(surface, stars, font):
+    for star in stars:
+        # adding 0.5 to improve rounding
+        x = star["x"] + 0.5
+        y = star["y"] + 0.5
+        text = font.render(star["name"], True, WHITE)
+        surface.blit(text, (x + 10, y - text.get_height() // 2))
+
+arrows = {
+    (-1, -1): "↖", (0, -1): "↑", (1, -1): "↗",
+    (-1, 0): "←",                (1, 0): "→",
+    (-1, 1): "↙",  (0, 1): "↓",  (1, 1): "↘"
+}
+def draw_dsos(surface, dsos, pixscale, font):
+    width, height = surface.get_size()
+    def draw_labelled_dso(dso, mark = None):
+        # adding 0.5 to improve rounding
+        x = dso["x"] + 0.5
+        y = dso["y"] + 0.5
+
+        # clamped text
+        margin = 10
+        cx = max(margin, min(width - margin, x))
+        cy = max(margin, min(height - margin, y))
+
+        label = dso["name"]
+        if mark:
+            if (x < width // 2):
+                label = f"{mark}{label}"
             else:
-                bottom_left = append_meta(bottom_left, "SINGLE_EXPTIME", suffix = "s")
-            bottom_left += "]"
+                label = f"{label}{mark}"
 
-        bottom_left_text = font.render(bottom_left, True, (255, 255, 255))
-        bottom_left_rect = bottom_left_text.get_rect()
-        bottom_left_rect.bottomleft = (10, h - 10)
-        surface.blit(bottom_left_text, bottom_left_rect)
+        text = font.render(label, True, WHITE)
+        tx = cx - text.get_width() // 2
+        ty = cy - text.get_height() // 2
+        # clamp to screen
+        tx = max(4, min(tx, width - text.get_width() - 4))
+        ty = max(4, min(ty, height - text.get_height() - 4))
+        surface.blit(text, (tx, ty))
 
-        # icons here might be nicer
-        top_right = ""
-        if saved:
-            top_right = tab(top_right) + "SAVED"
-        if paused:
-            top_right = tab(top_right) + "PAUSED"
+        # the position circle is only useful for very big things
+        radius_px = max(4, (dso.get("diameter", 0) * 60) / (2 * pixscale))
+        if radius_px > text.get_width() // 2:
+            pygame.draw.circle(surface, WHITE, (x, y), radius_px, width=1)
 
-        if top_right:
-            text = font.render(top_right, True, (255, 255, 255))
-            rect = text.get_rect()
-            rect.topright = (w - 10, 10)
-            surface.blit(text, rect)
+    def direction_indicator(x, y, width, height):
+        dx = 1 if x >= width else (-1 if x < 0 else 0)
+        dy = 1 if y >= height else (-1 if y < 0 else 0)
+        return arrows.get((dx, dy))
+
+    in_frame = []
+    out_frame = {}
+    margin = 50
+
+    for dso in dsos:
+        x = dso["x"]
+        y = dso["y"]
+        if margin <= x < (width - margin) and margin <= y < (height + margin):
+            in_frame.append(dso)
+        else:
+            ind = direction_indicator(x, y, width, height)
+            dist = ((x - width/2)**2 + (y - height/2)**2)**0.5
+            last = out_frame.get(ind)
+            if not last or dist < last[1]:
+                out_frame[ind] = (dso, dist)
+
+    # these can all still overlap
+    for dso in in_frame:
+        draw_labelled_dso(dso)
+
+    for mark, (dso, _) in out_frame.items():
+        draw_labelled_dso(dso, mark)
 
 class Menu:
     # TODO plate solving state should probably be remembered too
@@ -763,59 +939,61 @@ class Menu:
         if not self.screensaver:
             self.view.blit(screen)
 
-# Downscales the (bayered) image into the target width/height (possibly padding)
-# returning an rgb image (retaining the original bittype) and an (optional)
-# float32 mono variant.
+# Downscales the (bayered) image to fit within the target width/height returning
+# an rgb image (retaining the original bittype) and an (optional) float32 mono
+# variant.
+#
+# we might want to consider returning the mono image prior to binning, to improve
+# the chances of a good plate solve. But this will mean handling the ratios
+# in the caller.
+#
+# this can be surprisingly computationally expensive if we are not careful,
+# so we aim for speed above quality. General rescaling with nearest neighbour
+# turned out to be pretty bad quality (and certainly not worth the CPU).
 #
 # zoom means to crop to the target size (uses higher quality debayer)
 def downscale(mono, target_width, target_height, zoom, bayer, gray):
     height, width = mono.shape
     if target_height > height or target_width > width:
-        raise ValueError(f"downscale doesn't upscale ({mono.shape} => ({h},{w}))")
-
-    # this can be surprisingly computationally expensive if we are not careful,
-    # so we aim for speed above quality.
-    #
-    # we first throw away as much data as possible by cropping to the zoom
-    # region or downsampling and then padding to the aspect ratio.
-    #
-    # then we use a fast debayer (no interpolation) for osc.
-    #
-    # with what remains we scale the image evenly, and then quantise into 8
-    # bits. quantisation can be really slow if we do it too early. We use basic
-    # median / max values of the scaled images instead of using percentiles on
-    # the original, which gives us some protection against hot pixels.
-    #
-    # we always have to be mindful of resizing mono data to even numbers to
-    # preserve the bayer pattern.
+        raise ValueError(f"downscale doesn't upscale ({mono.shape} => ({height},{width}))")
 
     if zoom:
-        height, width = mono.shape
         startx = even_down(width // 2 - target_width // 2)
         starty = even_down(height // 2 - target_height // 2)
-        channels = mono[starty:starty + target_height, startx:startx + target_width]
+        mono = mono[starty:starty + target_height, startx:startx + target_width]
         if bayer:
             # doesn't downsample
-            channels = debayer_quality(channels, bayer)
-
+            rgb = debayer_quality(mono, bayer)
     else:
-        channels = down_sample_mono(mono, bayer, target_width, target_height)
-        channels = pad_to_aspect(channels, bayer, target_width, target_height)
         if bayer:
             # downsamples
-            channels = debayer_fast(channels, bayer)
-
-    channels = resize_nn(channels, target_width, target_height)
+            rgb = debayer_fast(mono, bayer)
+            rgb = pixel_bin(rgb, target_width, target_height)
+        else:
+            mono = pixel_bin(mono, target_width, target_height)
+            rgb = np.stack([mono] * 3, axis=-1)
 
     grayscale = None
     if bayer:
         if gray:
-            grayscale = channels @ np.array([0.299, 0.587, 0.114])
-        return (channels, grayscale)
+            grayscale = rgb @ np.array([0.299, 0.587, 0.114])
+        return (rgb, grayscale)
     else:
         if gray:
-            grayscale = channels.astype(np.float32)
-        return (np.stack([channels] * 3, axis=-1), grayscale)
+            grayscale = rgb[:, :, 0].astype(np.float32)
+        return (rgb, grayscale)
+
+# bins (averages) pixels until the img fits within the target size
+def pixel_bin(img, target_width, target_height):
+    height, width = img.shape[:2]
+    if width > target_width or height > target_height:
+        new_h = (height // 2) * 2
+        new_w = (width // 2) * 2
+        trimmed = img[:new_h, :new_w]
+        img = (trimmed[0::2, 0::2] + trimmed[0::2, 1::2] +
+               trimmed[1::2, 0::2] + trimmed[1::2, 1::2]) // 4
+        return pixel_bin(img, target_width, target_height)
+    return img
 
 # quantizes an image to 8 bits with astro specific noise/saturation
 # or an optional asinh stretch.
@@ -871,62 +1049,6 @@ def resize_nn(img, tw, th):
     xs = np.clip(xs, 0, w - 1)
     ys = np.clip(ys, 0, h - 1)
     return img[np.ix_(ys, xs)]  # handles arbitrary dimensions
-
-def crop_to_aspect(mono, bayer, target_width, target_height):
-    height, width = mono.shape
-    ar = width / height
-    target_ar = target_width / target_height
-    #print(f"we have {ar}, we aim for {target_ar}")
-    if ar < target_ar:
-        # like fitting VHS into widescreen, crop the height
-        new_height = even_up(int(width * target_ar))
-        sy = even_down((height - new_height) // 2)
-        mono = mono[sy:sy + new_height, :]
-    elif target_ar < ar:
-        # like playing widescreen on VHS, crop the width
-        new_width = even_up(int(height * target_ar))
-        sx = even_down((width - new_width) // 2)
-        mono = mono[:, sx:sx + new_width]
-    return mono
-
-# lossless way to fit it into the screen. we have previously
-# cropped to aspect but it loses data. See below
-def pad_to_aspect(mono, bayer, target_width, target_height):
-    height, width = mono.shape
-    ar = width / height
-    target_ar = target_width / target_height
-
-    if ar < target_ar:
-        # like VHS into widescreen, add padding left/right
-        new_width = even_up(int(width * target_ar))
-        pad = (new_width - width) // 2
-        # print(f"rescaling {ar} to {target_ar} with {pad} padding")
-        mono = np.pad(mono, ((0, 0), (pad, pad)), mode="constant")
-    elif ar > target_ar:
-        # like widescreen on CRT, letterbox add padding top/bottom
-        new_height = even_up(int(height * target_ar))
-        pad = (new_height - height) // 2
-        # print(f"rescaling {ar} to {target_ar} with {pad} padding")
-        mono = np.pad(mono, ((pad, pad), (0, 0)), mode="constant")
-
-    return mono
-
-# given a target size this will throw away entire rows and columns
-# to get into the right ballpark, retaining bayer cells.
-def down_sample_mono(mono, bayer, target_width, target_height):
-    height, width = mono.shape
-    if width >= target_width and height >= target_height:
-        step = min(width // (target_width), height // (target_height))
-        if not bayer and step >= 2:
-            mono = mono[::step, ::step]
-        elif bayer and step >= 4:
-            step = step // 2
-            # print(f"downsampling bayered image by {step}")
-            blk = mono.reshape(height // 2, 2, width // 2, 2)
-            blk = blk[::step, :, ::step, :]
-            ys, _, xs, _ = blk.shape
-            mono = blk.reshape(ys * 2, xs * 2)
-    return mono
 
 # debayer the mono image using the given pattern, using fast downsampling
 # that reduces the resolution of the returned image and only using one green
@@ -1087,7 +1209,7 @@ def histogram(img_raw, bins, bitdepth):
 
 def render_histogram(surface, hist, saturated, font,
                      padding_right = 0, padding_bottom = 0,
-                     colour=(255,255,255)):
+                     colour=WHITE):
     width = len(hist)
     # print(width)
     height = width // 2
@@ -1139,9 +1261,9 @@ if __name__ == "__main__":
 
     exp = 10.0
     # 3 minute dual band exposure
-    f = "test_data/osc/exposures/10.fit.fz"
+    # f = "test_data/osc/exposures/10.fit.fz"
     # actually a 30 second rgb exposure
-    # f = "test_data/osc/exposures/1.fit.fz"
+    f = "test_data/osc/exposures/1.fit.fz"
     # sony a7iii is RGGB
 
     h = fitsio.FITS(f)[1].read_header()
@@ -1173,15 +1295,22 @@ if __name__ == "__main__":
         "FILTER": "L",
         "BAYERPAT": bayer,
         "STAGE": Stage.CAPTURE,
-        "MODE": Mode.REPEAT
+        "MODE": Mode.REPEAT,
+        "XPIXSZ": 5.94,
+        "PLATE_SOLVE": True,
+        "POLAR_ALIGN": True
     }
     out = "/foo/bar/IMG_00001.fits"
     font = pygame.font.Font(luddcam_settings.hack, 14)
 
+    ra_center, dec_center, pixscale, parity = 10.70998331, 41.256808731, 16.477246715, 1.0
+    #ra_center, dec_center, pixscale, parity = None, None, None, None
+
     start = time.perf_counter()
-    render_frame_for_screen(surface, img_raw, zoom, meta, out, font, False, False)
+    ra_center, dec_center, pixscale, parity, focal_length = render_frame_for_screen(surface, img_raw, zoom, meta, out, font, False, False, ra_center, dec_center, pixscale, parity)
     end = time.perf_counter()
     print(f"rendering took {end - start:.2f}")
+    print(f"solution was {(ra_center, dec_center, pixscale, parity)} with {focal_length}")
 
     pygame.image.save(surface, "test.png")
     # Image.fromarray(out).save("test.png")

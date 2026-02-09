@@ -34,7 +34,9 @@ if bayer and h.get("ROWORDER") != "BOTTOM-UP":
 raw = np.flipud(fits.read())
 orig_height, orig_width = raw.shape
 
-rgb, data = luddcam_capture.downscale(raw, orig_width // 4, orig_height // 4, False, bayer, True)
+downsample = 4
+
+rgb, data = luddcam_capture.downscale(raw, orig_width // downsample, orig_height // downsample, False, bayer, True)
 
 # difference between stretching before vs after. After seems best
 #rgb = luddcam_capture.quantize(rgb, True)
@@ -42,10 +44,18 @@ rgb, data = luddcam_capture.downscale(raw, orig_width // 4, orig_height // 4, Fa
 rgb = luddcam_capture.quantize(rgb, True)
 
 objects = luddcam_astrometry.source_extract(data)
+#print(objects[:10])
+
 height, width = data.shape
 
+print(f"width={width}, height={height}")
+
 with luddcam_astrometry.Astrometry() as solver:
-    bounds = solver.solve_field(objects, width, height)
+    bounds = solver.solve_field(objects, width, height, None, None, None)
+    if not bounds:
+        print("no solution")
+        exit(1)
+
     print(bounds)
     ra_min = bounds["ramin"]
     ra_max = bounds["ramax"]
@@ -54,24 +64,37 @@ with luddcam_astrometry.Astrometry() as solver:
     dec_max = bounds["decmax"]
     dec_center = bounds["dec_center"]
     pixscale = bounds["pixscale"]
+    parity = bounds["parity"]
 
     print(f"found solution at {ra_center},{dec_center}")
     print(f"pixel scale is {pixscale}")
 
     print(f"resolving with the hints")
-    bounds = solver.solve_field(objects, width, height, (ra_center, dec_center), (pixscale * 0.99, pixscale * 1.01))
+    bounds = solver.solve_field(objects, width, height, (ra_center, dec_center), pixscale)
+    if not bounds:
+        print("no solution")
+        exit(1)
 
     # just testing that method, not actually used
+    start = time.perf_counter()
     radecs = solver.pixels_to_radec([(width // 2, height // 2), (0,0), (width, height), (width, 0), (0, height)])
-    for o in radecs:
-        print(f"RA/DEC={o}")
+    end = time.perf_counter()
+    print(f"pixels to radec took {end - start}")
+    #for o in radecs:
+    #    print(f"RA/DEC={o}")
 
     print(f"reference DEC = {dec_center}, between RA {ra_min} -> {ra_max}")
-    fixed_dec = np.column_stack([np.linspace(ra_min, ra_max, 100), np.full(100, dec_center)])
+    fixed_dec = [(ra, dec_center) for ra in np.linspace(ra_min, ra_max, 100)]
+    start = time.perf_counter()
     alignment_dec = solver.radec_to_pixels(fixed_dec)
+    end = time.perf_counter()
+    print(f"radec to pixels for polar alignment took {end - start}")
 
+    start = time.perf_counter()
     relevant_stars = solver.with_radec_to_pixels(luddcam_catalog.relevant_stars(dec_min, dec_max, ra_min, ra_max))
     relevant_dsos = solver.with_radec_to_pixels(luddcam_catalog.relevant_dsos(dec_min, dec_max, ra_min, ra_max))
+    end = time.perf_counter()
+    print(f"radec to pixels for DSOs took {end - start}")
 
 rgb_height, rgb_width,_ = rgb.shape
 

@@ -6,7 +6,7 @@ Luddcam supports a few carefully chosen "cheat codes", like electronic filter wh
 
 Whether you're a DIY tinker-photographer, an analog romantic, or just someone who enjoys feeling the click of a real button under a dark sky, Luddcam is for you.
 
-If you want to take the best picture possible, and squeeze every ounce of performance out of your gear, get an [ASIAIR](https://www.zwoastro.com/product-category/asiair/), [StellaVita](https://www.touptekastro.com/en-eu/products/stellavita), [StellarMate](https://stellarmate.com/) or a laptop with [SharpCap](https://www.sharpcap.co.uk/), [NINA](https://nighttime-imaging.eu/) and [PHD2](https://openphdguiding.org/).
+If you want to take the best picture possible, and squeeze every ounce of performance out of your gear, you don't want luddcam... instead get an [ASIAIR](https://www.zwoastro.com/product-category/asiair/), [StellaVita](https://www.touptekastro.com/en-eu/products/stellavita), [StellarMate](https://stellarmate.com/) or a laptop with [SharpCap](https://www.sharpcap.co.uk/), [NINA](https://nighttime-imaging.eu/) and [PHD2](https://openphdguiding.org/).
 
 # User Guide
 
@@ -37,7 +37,7 @@ When finished with the menu, press `SELECT` to go to the capture view, which wil
 <img src="./test_data/osc/assertions/live_capture_e.png" width="30%">
 </p>
 
- `A` can be used to zoom in to the central region which is excellent for focussing or mount star alignment.
+ `A` can be used to zoom in to the central region which is excellent for focusing or mount star alignment.
 
 <p align="center">
 <img src="./test_data/osc/assertions/live_zoom.png" width="30%">
@@ -52,7 +52,16 @@ Some useful information is shown on screen such as your exposure, file name, gai
 
 Histograms use a logarithm scale and are calculated across all the raw image pixels in their full bit depth. Also included is a count of saturated pixels (your hot pixels forever haunting you). Single shot mode is a great way to make sure you've dialled in your exposure lengths and gain.
 
-Once you're ready to start your session, press `B` to get back into `LIVE` mode, then `B` again to get a choice of `SINGLE` / `REPEAT` / `INTERVAL` modes.
+Once you're ready to start your session, press `B` to get back into `LIVE` mode, then `B` again to get a choice of `SINGLE` / `REPEAT` / `INTERVAL` modes. Here you can also enable plate solving to help greatly with finding and framing your target.
+
+<p align="center"><img src="./test_data/osc/assertions/secondary_menu.png" width="30%"></p>
+
+Plate solving will only be enabled in `LIVE` and `SINGLE` mode to conserve power. The first plate solve is the slowest, but will provide hints for future solves and any subsequent `.fits` files (speeding up plate solving in siril). This introduces a small amoutt of lag in the display of images.
+
+<p align="center">
+<img src="./test_data/osc/assertions/live_plate.png" width="30%">
+<img src="./test_data/osc/assertions/live_plate_e.png" width="30%">
+</p>
 
 All files are saved as (uncompressed) fits files and are flushed to disk, so once it says `SAVED` on the screen, it's physically on the drive. A DSLR style naming convention is used so that processing follows your standard workflow and all the fits headers you'd expect to see are there.
 
@@ -158,7 +167,7 @@ then turn it off and on again. You should see luddcam!
 
 - e-paper ✅
 - playback
-- plate solving
+- plate solving ✅
 - polar alignment
 
 ### Gamma

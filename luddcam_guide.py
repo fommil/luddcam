@@ -151,7 +151,7 @@ class Guide:
             capturing = False
             print("guide capture complete")
             data = self.guide.capture_finish()
-            metadata = mk_metadata(capture_exposure, self.guide)
+            metadata = mk_metadata(capture_exposure, self.guide, None, None, None)
             if capture_stage == Stage.LIVE:
                 self.view.set_data(None, data)
             else:

@@ -41,10 +41,29 @@ b()
 nothing(2)
 snap("live_again")
 
+# FIXME add a test for polar alignment
+
+# selects plate solving
+b()
+down()
+a()
+snap("secondary_menu")
+b()
+
+nothing(5)
+snap("live_plate")
+snap("live_plate_e", epaper=True)
+
+# disable plate solving
+b()
+down()
+a()
+b()
+
 # selects REPEAT mode
 b()
 right()
-a()
+b()
 
 nothing(2)
 snap("live_repeat")
@@ -99,5 +118,5 @@ expect_images(7)
 # TODO assert on the data and metadata of the output fits
 
 # Local Variables:
-# compile-command: "cd ../../../ ; ./luddcam.sh test"
+# compile-command: "cd ../../ ; ./luddcam.sh test"
 # End:

@@ -1,6 +1,7 @@
 from pathlib import Path
 import fitsio
 import numpy as np
+import os
 import sep
 import subprocess
 import tempfile
@@ -31,7 +32,7 @@ def source_extract(data):
     print(f"extract took {end-start} for {len(objects)} objects")
     # then trim, to speed up plate solving significantly
     objects = objects[np.argsort(objects["flux"])[::-1]]
-    objects = objects[:30]
+    objects = objects[:50]
     return objects
 
 class Astrometry:
@@ -41,14 +42,14 @@ class Astrometry:
         self.wcs = f"{self.workdir}/sources.wcs"
         self.radec = f"{self.workdir}/radec.fits"
         self.pixels = f"{self.workdir}/pixels.fits"
-        self.fields = ("ramin", "ramax", "decmin", "decmax", "ra_center", "dec_center", "pixscale")
+        self.fields = ("ramin", "ramax", "decmin", "decmax", "ra_center", "dec_center", "pixscale", "parity")
 
     def __enter__(self):
         return self
 
     def __exit__(self, *exc):
         for f in (self.xyls, self.wcs, self.radec, self.pixels):
-            Path(f).unlink(missing_ok=True)
+             Path(f).unlink(missing_ok=True)
         Path(self.workdir).rmdir()
 
     # plate solve with the output from SEP, i.e. (x,y,flux) point sources.
@@ -58,8 +59,9 @@ class Astrometry:
     # sources.wcs file in the directory).
     #
     # pos hint can be None or a tuple of (ra, dec)
-    # scale_hint can be None, or tuple of (lower, upper)
-    def solve_field(self, objects, width, height, pos_hint = None, scale_hint = (0.5, 30)):
+    # scale_hint can be None, or a number, or tuple of (lower, upper)
+    # parity_hint can be 1, 0 (or None), -1
+    def solve_field(self, objects, width, height, pos_hint = None, scale_hint = None, parity_hint = None):
         data = np.zeros(len(objects), dtype=[
             ("X", "f4"),
             ("Y", "f4"),
@@ -75,37 +77,64 @@ class Astrometry:
 
         scale = []
         if scale_hint:
-            lower, upper = scale_hint
+            if isinstance(scale_hint, tuple):
+                lower, upper = scale_hint
+            else:
+                lower, upper = (scale_hint * 0.95, scale_hint * 1.05)
             scale = ["--scale-low", str(lower), "--scale-high", str(upper)]
 
         position = []
         if pos_hint:
             ra, dec = pos_hint
-            position = ["--ra", str(ra), "--dec", str(dec), "--radius", "1"]
+            if ra is not None and dec is not None:
+                # 10 degrees is enough to speed things up in most cases
+                position = ["--ra", str(ra), "--dec", str(dec), "--radius", "10"]
 
-        limits = ["--cpulimit", "10"]
+        parity = []
+        # this looks the wrong way around, we choose to agree with wcsinfo
+        if parity_hint:
+            if parity_hint > 0:
+                parity = ["--parity", "neg"]
+            elif parity_hint < 0:
+                parity = ["--parity", "pos"]
 
         start = time.perf_counter()
-        subprocess.run(
-            ["solve-field", self.xyls,
-             "-D", self.workdir,
-             *scale, *position, *limits,
-             "--no-plots", "--no-verify", "--overwrite",
-             "--scale-units", "arcsecperpix",
-             "--corr", "none", "--match", "none",
-             "--rdls", "none", "--solved", "none",
-             "--new-fits", "none", "--index-xyls", "none",
-             "--temp-axy"],
-            check=True, capture_output=True, text=True
-        )
+        args = ["solve-field", self.xyls,
+                "-D", self.workdir,
+                *scale, *position, *parity,
+                "--no-plots", "--no-verify", "--overwrite",
+                "--scale-units", "arcsecperpix",
+                "--corr", "none", "--match", "none",
+                "--rdls", "none", "--solved", "none",
+                "--new-fits", "none", "--index-xyls", "none",
+                "--temp-axy",
+                # these last parameters speed things up significantly
+                "--no-remove-lines", "--uniformize", "0",
+                # this speeds things up a tiny little bit
+                "--no-tweak"]
+        #print(" ".join(args))
+
+        # delete any previous solutions so we can avoid stale results
+        Path(self.wcs).unlink(missing_ok=True)
+
+        try:
+            subprocess.run(args,check=True, capture_output=True, text=True, timeout=2)
+        except subprocess.TimeoutExpired:
+            print(f"plate solving timed out")
+            return None
         end = time.perf_counter()
         print(f"plate solving computation took {end-start}")
+
+        if not os.path.exists(self.wcs):
+            return None
+
+        bounds = {}
 
         result = subprocess.run(
             ["wcsinfo", self.wcs],
             check=True, capture_output=True, text=True
         )
-        bounds = {}
+        #print(result.stdout)
         for line in result.stdout.splitlines():
             parts = line.split()
             if len(parts) >= 2 and parts[0] in self.fields:
