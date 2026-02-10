@@ -44,6 +44,7 @@ import mocks
 ALIGN_LEFT=pygame_menu.locals.ALIGN_LEFT
 
 WHITE=(255, 255, 255)
+BLACK=(0, 0, 0)
 
 class Mode(Enum):
     SINGLE = 0
@@ -78,9 +79,6 @@ class Capture:
         self.mode = mode
         self.stage = Stage.STOP
         self.interval_idx = None
-
-        self.plate_solve = False
-        self.polar_align = False
 
         self.thread = threading.Thread(target=self.run, daemon=True, name="Capture")
 
@@ -279,8 +277,6 @@ class Capture:
                                     ("STAGE", capture_stage),
                                     ("IMAGE_COUNT", image_count),
                                     ("SINGLE_EXPTIME", self.camera_settings.exposure),
-                                    ("PLATE_SOLVE", self.plate_solve),
-                                    ("POLAR_ALIGN", self.polar_align),
                                     ("INTERVAL_INFO", interval_info)]
             if capture_stage is Stage.LIVE:
                 self.view.set_data(None, data, metadata_)
@@ -335,12 +331,12 @@ def mk_metadata(exp, camera, filt, cooling, plate):
     # these are pulled from the last known good solve
     # so may be inaccurate and delayed, but when it
     # works its a decent hint to siril.
-    ra, dec, focal_length = plate
-    if ra is not None:
+    # https://siril.readthedocs.io/en/stable/file-formats/FITS.html#list-of-fits-keywords
+    if ra := plate.ra_center:
         metadata.append(("RA", ra))
-    if dec is not None:
+    if dec := plate.dec_center:
         metadata.append(("DEC", dec))
-    if focal_length is not None:
+    if focal_length := plate.focal_length:
         metadata.append(("FOCALLEN", focal_length))
 
     return metadata
@@ -443,19 +439,44 @@ class View:
         self.is_paused = False
         self.saved = False
 
-        # plate solving hints
-        self.ra_center = None
-        self.dec_center = None
-        self.pixscale = None
-        self.parity = None
-        self.focal_length = None
+        self.plate_solve = False
+        self.align = None # ra, dec for the base then ra, dec for the test
+        self.hints = SolverHints()
 
         self.font_large = pygame.font.Font(luddcam_settings.hack, 32)
         self.font_small = pygame.font.Font(luddcam_settings.hack, 14)
 
+    def set_plate_solve(self, val):
+        with self.lock:
+            self.plate_solve = val
+
+    def get_plate_solve(self):
+        with self.lock:
+            return self.plate_solve
+
+    def toggle_align(self):
+        with self.lock:
+            hint_ra = self.hints.ra_center
+            hint_dec = self.hints.dec_center
+            if hint_ra is None or hint_dec is None:
+                # fail, reset
+                self.align = None
+                return
+            pos = (hint_ra, hint_dec)
+            match self.align:
+                case None:
+                    # start
+                    self.align = (pos, None)
+                case (start, None) :
+                    # prompt to realign
+                    self.align = (start, pos)
+                case _:
+                    # done
+                    self.align = None
+
     def get_plate(self):
         with self.lock:
-            return (self.ra_center, self.dec_center, self.focal_length)
+            return self.hints
 
     # Callable by the UI thread, enables or disables digital zoom.
     def toggle_zoom(self):
@@ -489,27 +510,23 @@ class View:
             zoom = self.zoom
             is_paused = self.is_paused
             saved = self.saved
+            plate_solve = self.plate_solve
+            hints = self.hints if plate_solve else None
+            align = self.align
             # doing it here instead of after avoids many timing issues
             self.stale = False
         if not stale:
             return
 
         if isinstance(img_raw, str) or img_raw is None:
-            surface.fill((0, 0, 0))
+            surface.fill(BLACK)
             if img_raw:
                 text = self.font_large.render(img_raw, True, WHITE)
                 rect = text.get_rect(center=(surface.get_width()//2, surface.get_height()//2))
                 surface.blit(text, rect)
         else:
             is_saved = saved == out
-            ra_center, dec_center, pixscale, parity, focal_length = render_frame_for_screen(
-                surface, img_raw, zoom, meta, out, self.font_small, is_paused, is_saved,
-                self.ra_center, self.dec_center, self.pixscale, self.parity)
-
-            # only update the hints if we got a successful plate solve.
-            # focal_length isn't reused as a hint
-            if None not in (ra_center, dec_center, pixscale, parity):
-                self.ra_center, self.dec_center, self.pixscale, self.parity, self.focal_length = ra_center, dec_center, pixscale, parity, focal_length
+            render_frame_for_screen(surface, img_raw, zoom, meta, out, self.font_small, is_paused, is_saved, hints, align)
 
     def message(self, msg):
         self.set_data(None, msg, None)
@@ -540,33 +557,30 @@ class View:
             self.saved = out
             self.stale = True
 
-# moved out for easier manual testing, returns a tuple containing the plate
-# solution hints for follow ups.
-#
-# note that the pixscale is after downsampling, so can't be used to calculate
-# the focal length.
-def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, saved, ra_center=None, dec_center=None, pixscale=None, parity=None):
+class SolverHints:
+    def __init__(self):
+        self.ra_center = None
+        self.dec_center = None
+        self.pixscale = None # of the image that was platesolved
+        self.scale = None # relative to the raw image
+        self.parity = None
+        self.focal_length = None
+
+# moved out for easier manual testing. Mutates the solver_hints
+# on a successful plate solve.
+def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, saved, solver_hints, polar_align):
     raw_height, raw_width = img_raw.shape
     target_width, target_height = surface.get_size()
 
     mode = meta["MODE"]
     stage = meta["STAGE"]
 
-    plate_solve = meta.get("PLATE_SOLVE") and not zoom
-    relevant_stars = None
-    relevant_dsos = None
-    polar_align = meta.get("POLAR_ALIGN") and not zoom
-    polar_alignment_points = None
-    focal_length = None
-
-    solve_field = (plate_solve or polar_align) and ((mode == Mode.SINGLE and saved) or stage == Stage.LIVE)
+    solve = solver_hints is not None and not zoom and ((mode == Mode.SINGLE and saved) or stage == Stage.LIVE)
 
     start = time.perf_counter()
     bayer = meta.get("BAYERPAT")
-    # need some other conditions for plate solving
-    img_rgb, img_mono = downscale(img_raw, target_width, target_height, zoom, bayer, solve_field)
+    img_rgb, img_mono = downscale(img_raw, target_width, target_height, zoom, bayer, solve)
     height, width, _ = img_rgb.shape
-    print(f"width = {width}, height = {height}")
     end = time.perf_counter()
     print(f"downscale took {end - start}")
 
@@ -575,42 +589,7 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
     # that looks good to the user. We could consider doing a basic centroid
     # conversion and reuse the last solution to save some cycles, or look
     # into having a hot server wrapper over solve-field if it's a problem.
-    if solve_field:
-        scale_factor = raw_height / height
-        centroids = luddcam_astrometry.source_extract(img_mono)
-
-        if len(centroids) > 10:
-            with luddcam_astrometry.Astrometry() as solver:
-                bounds = solver.solve_field(centroids, width, height, (ra_center, dec_center), pixscale, parity)
-                if not bounds and (pixscale or parity):
-                    bounds = solver.solve_field(centroids, width, height, None, pixscale, parity)
-                # if plate solving failed maybe we could try again with the full image just
-                # to get a starting point
-                if bounds:
-                    #print(bounds)
-                    ra_min = bounds["ramin"]
-                    ra_max = bounds["ramax"]
-                    ra_center = bounds["ra_center"]
-                    dec_min = bounds["decmin"]
-                    dec_max = bounds["decmax"]
-                    dec_center = bounds["dec_center"]
-                    pixscale = bounds["pixscale"]
-                    parity = bounds["parity"]
-                    print(f"plate solved at {ra_center},{dec_center} scale {pixscale}")
-
-                    if pixel_size := meta.get("XPIXSZ"):
-                        focal_length = round((scale_factor * pixel_size / pixscale) * 206.265)
-                        # print(f"focal_length = {focal_length}")
-
-                    if polar_align:
-                        ras = [(ra, dec_center) for ra in np.linspace(ra_min, ra_max, 100)]
-                        polar_alignment_points = list(solver.radec_to_pixels(ras))
-
-                    if plate_solve:
-                        stars = luddcam_catalog.relevant_stars(dec_min, dec_max, ra_min, ra_max)
-                        dsos = luddcam_catalog.relevant_dsos(dec_min, dec_max, ra_min, ra_max)
-                        relevant_stars = solver.with_radec_to_pixels(stars)
-                        relevant_dsos = solver.with_radec_to_pixels(dsos)
+    solved, relevant_stars, relevant_dsos, polar_alignment_points, polar_alignment_targets = plate_solve(solver_hints, img_mono, raw_height, meta.get("XPIXSZ"), polar_align)
 
     img_rgb = quantize(img_rgb, meta["EXPTIME"] >= 0.1)
 
@@ -620,17 +599,27 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
     img_surface = pygame.surfarray.make_surface(img_rgb)
 
     if polar_alignment_points:
-        # FIXME highlight the point midway between where we were and the line, persist it
-        # (might need a button press to lock it in, another button to disable)
         pygame.draw.lines(img_surface, WHITE, closed=False, points=polar_alignment_points, width=1)
 
     if relevant_stars:
         draw_stars(img_surface, relevant_stars, font)
 
+    if polar_alignment_targets:
+        (x1, y1), (x2, y2) = polar_alignment_targets
+        size = 10
+        thickness = 3
+        # where we probed (debugging really)
+        pygame.draw.rect(img_surface, WHITE, (x1 - 2, y1 - 2, 4, 4), 0)
+        # where we are
+        pygame.draw.circle(img_surface, WHITE, (width // 2, height // 2), size, 2)
+        # where we need to go
+        pygame.draw.line(img_surface, WHITE, (x2 - size, y2), (x2 + size, y2), thickness)
+        pygame.draw.line(img_surface, WHITE, (x2, y2 - size), (x2, y2 + size), thickness)
+
     # we could include the x/y offset here and allow the out-of-frame DSOs to be
     # plotted outside the image, but that's a bit of a corner case. boom boom.
-    if relevant_dsos and pixscale:
-        draw_dsos(img_surface, relevant_dsos, pixscale, font)
+    if relevant_dsos:
+        draw_dsos(img_surface, relevant_dsos, solver_hints.pixscale, font)
 
     def tab(s):
         if len(s) == 0:
@@ -662,18 +651,16 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
 
     # zoom should be minimal, it's really just for fine focus / framing
     if zoom:
-        return (None, None, None, None, None)
+        return
 
-    # TODO visual feedback if plate solving failed
-    # TODO a graphical indicator that we are polar aligning
-
-    if (bitdepth := meta.get("BITDEPTH")):
-        width = 128
-        hist, saturated = histogram(img_raw, width, bitdepth)
+    if (bitdepth := meta.get("BITDEPTH")) and not (solve and stage == Stage.LIVE):
+        # don't render the histogram when doing live plate solving as they
+        # interfere with each other.
+        hist_width = 128
+        hist, saturated = histogram(img_raw, hist_width, bitdepth)
         render_histogram(surface, hist, saturated, font, 10, 10)
 
     top_left = ""
-    bottom_left = ""
     if out:
         top_left = tab(top_left) + pathlib.Path(out).name.split(".")[0]
 
@@ -682,8 +669,6 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
     top_left = append_meta(top_left, "FILTER", prefix=" ", align=False)
 
     if stage == Stage.LIVE:
-        # TODO when it is live we should include info about the stage
-        # in the bottom left.
         top_left = tab(top_left) + stage.name
     else:
         top_left = tab(top_left) + mode.name
@@ -696,6 +681,39 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
     top_left_rect = top_left_text.get_rect()
     top_left_rect.topleft = (10, 10)
     surface.blit(top_left_text, top_left_rect)
+
+    # this is an info area just below the top left
+    top_left2 = ""
+    if solve:
+        match polar_align:
+            case _ if not solved:
+                top_left2 = "FAIL plate solve"
+            case None:
+                pass
+            case ((ra, dec), None):
+                delta_ra = (solver_hints.ra_center - ra) % 360
+                if delta_ra > 180:
+                    delta_ra = delta_ra - 360
+                    delta_ra = abs(delta_ra)
+                delta_dec = abs(solver_hints.dec_center - dec) / 2
+                pec = ""
+                if delta_ra > 1:
+                    pec = round(60 * 60 * delta_dec / delta_ra)
+                    pec = f" ({pec}\")"
+                if not any(0 <= x < width and 0 <= y < height for x, y in polar_alignment_points):
+                    # we've gone so far we can't see the DEC anymore
+                    top_left2 = f"slew RA closer{pec}"
+                elif delta_ra < 10:
+                    top_left2 = f"slew RA further{pec}"
+                else:
+                    top_left2 = f"press A to polar align{pec}"
+            case ((ra1, dec1), (ra2, dec2)):
+                top_left2 = f"center target with alt/az, press A to exit"
+
+    top_left2_text = font.render(top_left2, True, WHITE)
+    top_left2_rect = top_left2_text.get_rect()
+    top_left2_rect.topleft = (10, top_left_rect.bottom + 5) # just below the 1st line
+    surface.blit(top_left2_text, top_left2_rect)
 
     # bottom left should indicate what the shutter will do in LIVE
     bottom_left = ""
@@ -725,7 +743,68 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
         rect.topright = (target_width - 10, 10)
         surface.blit(text, rect)
 
-    return (ra_center, dec_center, pixscale, parity, focal_length)
+def plate_solve(hints, img_mono, raw_height, pixel_size, polar_align):
+    if hints is None or img_mono is None:
+        return False, None, None, None, None
+
+    height, width = img_mono.shape
+    scale_factor = raw_height / height
+    centroids = luddcam_astrometry.source_extract(img_mono)
+    scale_hint = hints.pixscale
+    if scale_hint is None:
+        scale_hint = (scale_factor * 0.5, None)
+    pos_hint = (hints.ra_center, hints.dec_center)
+    parity_hint = hints.parity
+
+    relevant_stars, relevant_dsos, polar_alignment_points, polar_alignment_targets = None, None, None, None
+    if len(centroids) > 10:
+        with luddcam_astrometry.Astrometry() as solver:
+            bounds = solver.solve_field(centroids, width, height, pos_hint, scale_hint, parity_hint)
+            if not bounds and parity_hint:
+                # if we had some hints and it still failed, try with reduced
+                # hints. The only way to reset after this is to go into the
+                # menu and come back, e.g. if the user changed the
+                # backspacing or optics.
+                bounds = solver.solve_field(centroids, width, height, None, scale_hint, parity_hint)
+            # to get a starting point
+            if not bounds:
+                return False, None, None, None, None
+            #print(bounds)
+            ra_min = bounds["ramin"]
+            ra_max = bounds["ramax"]
+            hints.ra_center = bounds["ra_center"]
+            dec_min = bounds["decmin"]
+            dec_max = bounds["decmax"]
+            hints.dec_center = bounds["dec_center"]
+            hints.pixscale = bounds["pixscale"]
+            hints.parity = bounds["parity"]
+            hints.scale = scale_factor
+
+            if pixel_size:
+                hints.focal_length = round((scale_factor * pixel_size / hints.pixscale) * 206.265)
+                # print(f"focal_length = {focal_length}")
+
+            print(f"plate solved at {hints.ra_center},{hints.dec_center} scale {hints.pixscale} with {hints.focal_length}mm")
+
+            match polar_align:
+                case None:
+                    stars = luddcam_catalog.relevant_stars(dec_min, dec_max, ra_min, ra_max)
+                    dsos = luddcam_catalog.relevant_dsos(dec_min, dec_max, ra_min, ra_max)
+                    relevant_stars = solver.with_radec_to_pixels(stars)
+                    relevant_dsos = solver.with_radec_to_pixels(dsos)
+                case ((ra1, dec1), None):
+                    ras = [(ra, dec1) for ra in np.linspace(ra_min, ra_max, 100)]
+                    polar_alignment_points = [tuple(a) for a in solver.radec_to_pixels(ras)]
+                case ((ra1, dec1), (ra2, dec2)):
+                    targets = [
+                        # where we probed
+                        (ra2, dec2),
+                        # where to go
+                        (ra2, (dec1 + dec2) / 2)
+                    ]
+                    polar_alignment_targets = [tuple(a) for a in solver.radec_to_pixels(targets)]
+
+    return True, relevant_stars, relevant_dsos, polar_alignment_points, polar_alignment_targets
 
 def draw_stars(surface, stars, font):
     for star in stars:
@@ -768,9 +847,10 @@ def draw_dsos(surface, dsos, pixscale, font):
         surface.blit(text, (tx, ty))
 
         # the position circle is only useful for very big things
-        radius_px = max(4, (dso.get("diameter", 0) * 60) / (2 * pixscale))
-        if radius_px > text.get_width() // 2:
-            pygame.draw.circle(surface, WHITE, (x, y), radius_px, width=1)
+        if pixscale:
+            radius_px = max(4, (dso.get("diameter", 0) * 60) / (2 * pixscale))
+            if radius_px > text.get_width() // 2:
+                pygame.draw.circle(surface, WHITE, (x, y), radius_px, width=1)
 
     def direction_indicator(x, y, width, height):
         dx = 1 if x >= width else (-1 if x < 0 else 0)
@@ -846,23 +926,14 @@ class Menu:
             align=ALIGN_LEFT)
 
         def select_plate_solve(a):
-            print(f"toggling plate solving, got {a}")
-            self.capture.plate_solve = a
+            #print(f"toggling plate solving, got {a}")
+            self.view.set_plate_solve(a)
         menu.add.toggle_switch(
             "Plate Solving",
-            self.capture.plate_solve,
+            self.view.get_plate_solve(),
             state_text=('Off', 'Live'),
             onchange=select_plate_solve,
-            align=ALIGN_LEFT)
-
-        def select_polar_align(a):
-            print(f"toggling polar alignment, got {a}")
-            self.capture.polar_align = True
-        menu.add.toggle_switch(
-            "Polar Align",
-            self.capture.polar_align,
-            state_text=('Off', 'Live'),
-            onchange=select_polar_align,
+            state_color=(BLACK, BLACK),
             align=ALIGN_LEFT)
 
         return menu
@@ -923,18 +994,20 @@ class Menu:
                     # back is now screensaver
                     self.screensaver = True
                     print("blanking screen")
-                    screen.fill((0, 0, 0))
+                    screen.fill(BLACK)
                     backlight_off()
                     self.epaper.sleep()
             elif is_action(event):
-                # TODO zoom should be changed to a two stage process: first
-                # click shows a box, arrows move around, second click goes in
-                # (arrows still work). The settings should persist per camera.
-                # we need a way to either reset or (preferred) visually
-                # highlight that we're dead on center, maybe by showing a faded
-                # version of the center view.
-                self.zoom = self.view.toggle_zoom()
-            # TODO LEFT/RIGHT could be used to PAUSE and go to playback from disk
+                if self.view.get_plate_solve():
+                    self.view.toggle_align()
+                else:
+                    # TODO zoom should be changed to a two stage process: first
+                    # click shows a box, arrows move around, second click goes in
+                    # (arrows still work). The settings should persist per camera.
+                    # we need a way to either reset or (preferred) visually
+                    # highlight that we're dead on center, maybe by showing a faded
+                    # version of the center view.
+                    self.zoom = self.view.toggle_zoom()
 
         if not self.screensaver:
             self.view.blit(screen)
@@ -1294,23 +1367,25 @@ if __name__ == "__main__":
         "GAIN": 180.0,
         "FILTER": "L",
         "BAYERPAT": bayer,
-        "STAGE": Stage.CAPTURE,
-        "MODE": Mode.REPEAT,
-        "XPIXSZ": 5.94,
-        "PLATE_SOLVE": True,
-        "POLAR_ALIGN": True
+        "STAGE": Stage.LIVE,
+        "MODE": Mode.SINGLE,
+        "XPIXSZ": 5.94
     }
     out = "/foo/bar/IMG_00001.fits"
     font = pygame.font.Font(luddcam_settings.hack, 14)
 
-    ra_center, dec_center, pixscale, parity = 10.70998331, 41.256808731, 16.477246715, 1.0
-    #ra_center, dec_center, pixscale, parity = None, None, None, None
+    hints = SolverHints()
+    hints.ra_center = 10.70998331
+    hints.dec_center = 41.256808731
+    hints.pixscale = 16.477246715
+    hints.focal_length = 595
+
+    align = ((0, 41.5), (10.7, 41.3))
 
     start = time.perf_counter()
-    ra_center, dec_center, pixscale, parity, focal_length = render_frame_for_screen(surface, img_raw, zoom, meta, out, font, False, False, ra_center, dec_center, pixscale, parity)
+    render_frame_for_screen(surface, img_raw, zoom, meta, out, font, False, False, hints, align)
     end = time.perf_counter()
     print(f"rendering took {end - start:.2f}")
-    print(f"solution was {(ra_center, dec_center, pixscale, parity)} with {focal_length}")
 
     pygame.image.save(surface, "test.png")
     # Image.fromarray(out).save("test.png")

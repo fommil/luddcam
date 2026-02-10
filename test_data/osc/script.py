@@ -41,8 +41,6 @@ b()
 nothing(2)
 snap("live_again")
 
-# FIXME add a test for polar alignment
-
 # selects plate solving
 b()
 down()
@@ -53,6 +51,18 @@ b()
 nothing(5)
 snap("live_plate")
 snap("live_plate_e", epaper=True)
+
+# enable polar alignment
+a()
+nothing(2)
+snap("live_polar1")
+snap("live_polar1_e", epaper=True)
+
+# polar alignment without moving
+a()
+nothing(2)
+snap("live_polar2")
+snap("live_polar2_e", epaper=True)
 
 # disable plate solving
 b()

@@ -7,6 +7,13 @@ import subprocess
 import tempfile
 import time
 
+# can be northern, southern, or empty
+#
+# an even better optimisation here would be if we had the user's exact
+# location and time, then we could limit the search to just the objects
+# overhead within a tighter tolerance.
+hemisphere = os.environ.get('HEMISPHERE', '').lower()
+
 # We prefer to do the source extraction in python so that we don't
 # have to deal with large fits files on disk just to interact with
 # astrometry, reducing the memory overheads significantly even if
@@ -89,6 +96,12 @@ class Astrometry:
             if ra is not None and dec is not None:
                 # 10 degrees is enough to speed things up in most cases
                 position = ["--ra", str(ra), "--dec", str(dec), "--radius", "10"]
+
+        if not position:
+            if hemisphere == "northern":
+                position = ["--ra", "0", "--dec", "90", "--radius", "110"]
+            elif hemisphere == "southern":
+                position = ["--ra", "0", "--dec", "-90", "--radius", "110"]
 
         parity = []
         # this looks the wrong way around, we choose to agree with wcsinfo
