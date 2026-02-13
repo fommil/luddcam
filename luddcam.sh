@@ -31,7 +31,8 @@ fi
 case "${1:-}" in
     install)
         sudo apt update
-        sudo apt install libasi python3-pygame python3-box python3-fitsio python3-sep udevil exfatprogs fonts-hack siril-common astrometry.net astrometry-data-tycho2
+        # warning: astrometry.net is massively bloated in raspberry pi and pulls in a tonne of stuff we don't need
+        sudo apt install libasi python3-pygame python3-box python3-fitsio python3-sep udevil exfatprogs fonts-hack astrometry.net astrometry-data-tycho2
 
         if [ -f /proc/device-tree/model ] && grep -qi "raspberry pi" /proc/device-tree/model 2>/dev/null; then
             # workaround old bugs in the udevil support for exfat, works on debian

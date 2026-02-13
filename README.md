@@ -139,6 +139,40 @@ dtoverlay=vc4-kms-dsi-waveshare-panel,4_3_inch
 
 Unfortunately the backlight cannot be turned off entirely, but we try to dim it as much as possible. I'm able to get about 3 hours (on an rpi 4b and imx715 planetary camera taking 10 second exposures) with a 5amp / 120g usb power bank, and almost 12 hours with a larger 20amp / 250g bank, drawing 1.0A with the screensaver on (i.e. dimmed). It draws 1.1A if the screen is left on.
 
+## Power Saving
+
+There's a few things that can be done to reduce the power consumption on a raspberry pi. The ones I found that worked well are listed below:
+
+In `/boot/firmware/config.txt`
+
+```
+# disables HDMI, only useful if you shell in remotely
+dtoverlay=vc4-kms-v3d,nohdmi
+
+# disables wifi and bluetooth, only useful if you have a wired connection
+dtoverlay=disable-wifi
+dtoverlay=disable-bt
+```
+
+then update the eeprom (this is not done automatically with software updates)
+
+```
+sudo rpi-eeprom-update -a
+```
+
+then to reduce the power when halted
+
+```
+sudo -E rpi-eeprom-config --edit
+```
+
+and set
+
+```
+WAKE_ON_GPIO=0
+POWER_OFF_ON_HALT=1
+```
+
 # Installation
 
 This assumes that you already have a Raspberry Pi 4b (or higher) that is relatively up to date.
@@ -175,9 +209,10 @@ then turn it off and on again. You should see luddcam!
 ### Beta
 
 - e-paper ✅
-- playback
 - plate solving ✅
 - polar alignment ✅
+- focus helper
+- playback
 
 ### Gamma
 

@@ -7,6 +7,11 @@ import subprocess
 import tempfile
 import time
 
+# FIXME maybe make this a setting and allow it to be tuned e.g. for the
+# hemisphere and night's RA or month, it definitely speeds things up. the
+# default value could be the current month from the untrustworthy clock that
+# might be reasonably up to date.
+#
 # can be northern, southern, or empty
 #
 # an even better optimisation here would be if we had the user's exact
@@ -131,7 +136,7 @@ class Astrometry:
         Path(self.wcs).unlink(missing_ok=True)
 
         try:
-            subprocess.run(args,check=True, capture_output=True, text=True, timeout=2)
+            subprocess.run(args,check=True, capture_output=True, text=True, timeout=5)
         except subprocess.TimeoutExpired:
             print(f"plate solving timed out")
             return None

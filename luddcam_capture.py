@@ -584,6 +584,11 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
     end = time.perf_counter()
     print(f"downscale took {end - start}")
 
+    # FIXME implement focus helper and consider the trade off between doing the
+    # SEP on a quality downscaled image vs fast downscale with full res SEP
+    # (after bayering... i.e. img_rgb and img_mono would be different sizes but
+    # that can be fixed by a scaling factor).
+
     # plate solving is relatively expensive and it might seem silly to do it
     # here and block this thread, but it is the only way to do it in a way
     # that looks good to the user. We could consider doing a basic centroid
@@ -1380,7 +1385,8 @@ if __name__ == "__main__":
     hints.pixscale = 16.477246715
     hints.focal_length = 595
 
-    align = ((0, 41.5), (10.7, 41.3))
+    align = ((0, 41.5), None)
+    #align = ((0, 41.5), (10.7, 41.3))
 
     start = time.perf_counter()
     render_frame_for_screen(surface, img_raw, zoom, meta, out, font, False, False, hints, align)
