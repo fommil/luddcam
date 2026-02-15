@@ -26,6 +26,12 @@ elif [ "$MACHINE" = "aarch64" ] ; then
     export LD_LIBRARY_PATH="$PWD/libtoupcam/linux/arm64:$PWD/libasi/linux/armv8:$LD_LIBRARY_PATH"
 fi
 
+if [ -f /proc/device-tree/model ] && grep -qi "raspberry pi" /proc/device-tree/model 2>/dev/null; then
+    IS_RPI=true
+else
+    IS_RPI=false
+fi
+
 #echo "luddcam.sh: LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
 
 case "${1:-}" in
@@ -34,7 +40,7 @@ case "${1:-}" in
         # warning: astrometry.net is massively bloated in raspberry pi and pulls in a tonne of stuff we don't need
         sudo apt install libasi python3-pygame python3-box python3-fitsio python3-sep udevil exfatprogs fonts-hack astrometry.net astrometry-data-tycho2
 
-        if [ -f /proc/device-tree/model ] && grep -qi "raspberry pi" /proc/device-tree/model 2>/dev/null; then
+        if $IS_RPI ; then
             # workaround old bugs in the udevil support for exfat, works on debian
             sudo apt install exfat-fuse
             sudo ln -fs mount.exfat-fuse /usr/sbin/mount.exfat
@@ -72,11 +78,21 @@ case "${1:-}" in
         exec python3 regression_tests.py | grep -v DETECT_AVX2
         ;;
     *)
-        # turns off the red power, and green activity, LED on rpis
-        if [ -f /sys/class/leds/PWR ] && [ -f /sys/class/leds/ACT ] ; then
+        if $IS_RPI ; then
+            # turns off the red power, and green activity, LED on rpis
             for LED in PWR ACT ; do
+                echo $LED
                 echo none | sudo tee /sys/class/leds/${LED}/trigger || true
                 echo 0 | sudo tee /sys/class/leds/${LED}/brightness || true
+            done
+
+            # this reduces voltage spikes, be nice to the battery pack
+            for cpu in /sys/devices/system/cpu/cpu[0-9]*; do
+                echo $cpu
+                FREQS=($(cat $cpu/cpufreq/scaling_available_frequencies))
+                MID_FREQ=${FREQS[${#FREQS[@]} / 2]}
+                #echo "disabling boost by setting cpu max to $MID_FREQ"
+                echo $MID_FREQ | sudo tee $cpu/cpufreq/scaling_max_freq || true
             done
         fi
 

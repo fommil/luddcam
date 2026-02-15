@@ -141,7 +141,7 @@ Unfortunately the backlight cannot be turned off entirely, but we try to dim it 
 
 ## Power Saving
 
-There's a few things that can be done to reduce the power consumption on a raspberry pi. The ones I found that worked well are listed below:
+Luddcam will automatically disable cpu boost (which can cause crashes on battery packs) and try to turn off the LEDs. There's a few more things that can be done to reduce the power consumption on a raspberry pi. The ones I found that worked well are listed below. These are entirely optional:
 
 In `/boot/firmware/config.txt`
 
@@ -152,6 +152,13 @@ dtoverlay=vc4-kms-v3d,nohdmi
 # disables wifi and bluetooth, only useful if you have a wired connection
 dtoverlay=disable-wifi
 dtoverlay=disable-bt
+
+# give more RAM to the CPU instead of the GPU
+gpu_mem=16
+
+# disable ethernet LEDs (not possible at runtime)
+dtparam=eth_led0=4
+dtparam=eth_led1=4
 ```
 
 then update the eeprom (this is not done automatically with software updates)

@@ -4,7 +4,7 @@ After=default.target
 
 [Service]
 WorkingDirectory=PWD
-ExecStart=/bin/bash -c "devmon > ../devmon.log 2>&1 & exec ./luddcam.sh > ../luddcam.log 2>&1"
+ExecStart=/bin/bash -c "devmon > ../devmon.log 2>&1 & touch ../luddcam.log && tail -n 10000 ../luddcam.log > ../luddcam.log.tmp && mv ../luddcam.log.tmp ../luddcam.log && exec ./luddcam.sh >> ../luddcam.log 2>&1"
 Restart=on-failure
 
 [Install]

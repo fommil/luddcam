@@ -11,7 +11,26 @@
 #
 # Discussion here about Siril header requirements:
 # https://discuss.pixls.us/t/formats-and-headers-supported-required-by-siril/50531
-
+#
+# Polar Alignment works like this: imagine you have a print out of concentric
+# circles and a transparent sheet with the same circles. If perfectly aligned,
+# they will overlap. To simulate bad polar alignment, move the transparent sheet
+# a little and find a point on one of the circles where the lines cross. Then
+# travel 90 degrees in either direction, this is the drift over 6 hours and can
+# be corrected by moving the transparent sheet by the misalignment amount. Note
+# that this assumes that only the azimuth direction is misaligned. To handle the
+# more likely scenario that is a mixture of altitude and azimuth, we need to
+# take a heuristic approach: pick any point in the sky (we can visualise this by
+# drawing a circle on the transparent sheet so that it crosses the paper's
+# circle at exactly the point of the sky we're looking at). Then move any
+# distance from 30 to 90 degrees and note the difference. Find the midpoint
+# between where we are and where we should be, and have the user realign their
+# telescope (using only alt/az screws) to point there. Repeating gets
+# increasingly closer to the true alignment and we can even optimise this
+# algorithm when the movement is entirely in the alt or az direction (which
+# requires location and time information, that luddcam can't access... but the
+# user can do this manually when they notice that a single screw is doing the
+# heavy lifting).
 
 from datetime import datetime, timezone
 from enum import Enum
@@ -80,6 +99,8 @@ class Capture:
         self.stage = Stage.STOP
         self.interval_idx = None
 
+        self.live_cap = 1
+
         self.thread = threading.Thread(target=self.run, daemon=True, name="Capture")
 
         if output_dir:
@@ -127,6 +148,11 @@ class Capture:
     def get_stage(self):
         with self.lock:
             return self.stage
+
+    # Can be called by the UI thread to inspect the current Mode.
+    def get_mode(self):
+        with self.lock:
+            return self.mode
 
     def run(self):
         # indicates that we started a capture using the given mode.
@@ -206,9 +232,9 @@ class Capture:
                         capture_slot = self.wheel_settings.default
                         self.wheel.set_slot_and_wait(capture_slot)
 
-                if stage is Stage.LIVE and capture_exposure > 1:
+                if stage is Stage.LIVE and capture_exposure > self.live_cap:
                     # intentionally limit live exposures
-                    capture_exposure = 1
+                    capture_exposure = self.live_cap
 
                 capture_start = time.monotonic()
                 # print(f"starting exposure with {capture_exposure} at {capture_start}")
@@ -562,7 +588,6 @@ class SolverHints:
         self.ra_center = None
         self.dec_center = None
         self.pixscale = None # of the image that was platesolved
-        self.scale = None # relative to the raw image
         self.parity = None
         self.focal_length = None
 
@@ -576,25 +601,52 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
     stage = meta["STAGE"]
 
     solve = solver_hints is not None and not zoom and ((mode == Mode.SINGLE and saved) or stage == Stage.LIVE)
+    polar_align = solve and polar_align and stage == Stage.LIVE
 
     start = time.perf_counter()
     bayer = meta.get("BAYERPAT")
-    img_rgb, img_mono = downscale(img_raw, target_width, target_height, zoom, bayer, solve)
+    img_rgb, img_mono = downscale(img_raw, target_width, target_height, zoom, bayer)
     height, width, _ = img_rgb.shape
     end = time.perf_counter()
     print(f"downscale took {end - start}")
-
-    # FIXME implement focus helper and consider the trade off between doing the
-    # SEP on a quality downscaled image vs fast downscale with full res SEP
-    # (after bayering... i.e. img_rgb and img_mono would be different sizes but
-    # that can be fixed by a scaling factor).
 
     # plate solving is relatively expensive and it might seem silly to do it
     # here and block this thread, but it is the only way to do it in a way
     # that looks good to the user. We could consider doing a basic centroid
     # conversion and reuse the last solution to save some cycles, or look
     # into having a hot server wrapper over solve-field if it's a problem.
-    solved, relevant_stars, relevant_dsos, polar_alignment_points, polar_alignment_targets = plate_solve(solver_hints, img_mono, raw_height, meta.get("XPIXSZ"), polar_align)
+    centroids = []
+    solved, relevant_stars, relevant_dsos, polar_alignment_points, polar_alignment_targets = False, None, None, None, None
+    if solve:
+        # we throw away data in pairs of two, which effectively means picking
+        # the first colour in the bayer for OSC. We also take the opportunity to
+        # downscale big (full frame) images that are overkill.
+        img_mono = pixel_sample(img_raw, min(raw_width // 2, 2000), min(raw_height // 2, 2000)).astype(np.float32)
+        # relative to displayed image, for solving
+        scale_factor_v = img_mono.shape[0] / height
+        # print(f"factors = {scale_factor}, {scale_factor_v}")
+        centroids = luddcam_astrometry.source_extract(img_mono)
+        x = centroids["x"] / scale_factor_v
+        y = centroids["y"] / scale_factor_v
+        flux = centroids["flux"]
+        # scaled centroids relative to original (for focal length calc)
+        scale_factor = raw_height / height
+
+        centroids = np.array(list(zip(x, y, flux)), dtype=[("x", float), ("y", float), ("flux", float)])
+        solved, relevant_stars, relevant_dsos, polar_alignment_points, polar_alignment_targets = plate_solve(solver_hints, centroids, width, height, scale_factor, meta.get("XPIXSZ"), polar_align)
+
+    focus_magic = None
+    if zoom and stage == Stage.LIVE and img_mono is not None:
+        # we could calculate focus magic on the entire image, but that can be
+        # slow and introduce frustrating lag. Therefore we use the zoomed region
+        # which has been carefully prepared for us already. Note that the
+        # difference in the numbers can be quite substantial, so maybe revisit.
+        start = time.perf_counter()
+        centroids = luddcam_astrometry.source_extract(img_mono.astype(np.float32))
+        end = time.perf_counter()
+        print(f"focus magic took {end - start}")
+        #focus_magic = np.median(centroids["a"])
+        focus_magic = np.average(centroids["a"], weights=centroids["flux"])
 
     img_rgb = quantize(img_rgb, meta["EXPTIME"] >= 0.1)
 
@@ -618,6 +670,7 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
         # where we are
         pygame.draw.circle(img_surface, WHITE, (width // 2, height // 2), size, 2)
         # where we need to go
+        # FIXME handle when off screen
         pygame.draw.line(img_surface, WHITE, (x2 - size, y2), (x2 + size, y2), thickness)
         pygame.draw.line(img_surface, WHITE, (x2, y2 - size), (x2, y2 + size), thickness)
 
@@ -656,11 +709,16 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
 
     # zoom should be minimal, it's really just for fine focus / framing
     if zoom:
+        if focus_magic:
+            top_left = f"Focus magic: {focus_magic:.2f}"
+            top_left_text = font.render(top_left, True, WHITE)
+            top_left_rect = top_left_text.get_rect()
+            top_left_rect.topleft = (10, 10)
+            surface.blit(top_left_text, top_left_rect)
         return
 
-    if (bitdepth := meta.get("BITDEPTH")) and not (solve and stage == Stage.LIVE):
-        # don't render the histogram when doing live plate solving as they
-        # interfere with each other.
+    if (bitdepth := meta.get("BITDEPTH")) and not solved:
+        # the histogram and plate solving get in each others way
         hist_width = 128
         hist, saturated = histogram(img_raw, hist_width, bitdepth)
         render_histogram(surface, hist, saturated, font, 10, 10)
@@ -672,6 +730,9 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
     top_left = append_meta(top_left, "EXPTIME", suffix = "s")
     top_left = append_meta(top_left, "GAIN", prefix=" ", suffix = "cB", align=False) # centibel = 0.1dB
     top_left = append_meta(top_left, "FILTER", prefix=" ", align=False)
+
+    if solver_hints and solver_hints.focal_length:
+        top_left = tab(top_left) + f"{solver_hints.focal_length}mm"
 
     if stage == Stage.LIVE:
         top_left = tab(top_left) + stage.name
@@ -702,6 +763,7 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
                     delta_ra = abs(delta_ra)
                 delta_dec = abs(solver_hints.dec_center - dec) / 2
                 pec = ""
+                # FIXME the text and bounds and PECs should be updated to match recent findings
                 if delta_ra > 1:
                     pec = round(60 * 60 * delta_dec / delta_ra)
                     pec = f" ({pec}\")"
@@ -748,13 +810,13 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
         rect.topright = (target_width - 10, 10)
         surface.blit(text, rect)
 
-def plate_solve(hints, img_mono, raw_height, pixel_size, polar_align):
-    if hints is None or img_mono is None:
+# this takes the centroids of an image that is potentially scaled down for display
+#
+# e.g. if a raw image is reduced 8x for display, scale_factor should be set to 8.
+def plate_solve(hints, centroids, width, height, scale_factor, pixel_size, polar_align):
+    if hints is None or len(centroids) < 10:
         return False, None, None, None, None
 
-    height, width = img_mono.shape
-    scale_factor = raw_height / height
-    centroids = luddcam_astrometry.source_extract(img_mono)
     scale_hint = hints.pixscale
     if scale_hint is None:
         scale_hint = (scale_factor * 0.5, None)
@@ -762,52 +824,50 @@ def plate_solve(hints, img_mono, raw_height, pixel_size, polar_align):
     parity_hint = hints.parity
 
     relevant_stars, relevant_dsos, polar_alignment_points, polar_alignment_targets = None, None, None, None
-    if len(centroids) > 10:
-        with luddcam_astrometry.Astrometry() as solver:
-            bounds = solver.solve_field(centroids, width, height, pos_hint, scale_hint, parity_hint)
-            if not bounds and parity_hint:
-                # if we had some hints and it still failed, try with reduced
-                # hints. The only way to reset after this is to go into the
-                # menu and come back, e.g. if the user changed the
-                # backspacing or optics.
-                bounds = solver.solve_field(centroids, width, height, None, scale_hint, parity_hint)
-            # to get a starting point
-            if not bounds:
-                return False, None, None, None, None
-            #print(bounds)
-            ra_min = bounds["ramin"]
-            ra_max = bounds["ramax"]
-            hints.ra_center = bounds["ra_center"]
-            dec_min = bounds["decmin"]
-            dec_max = bounds["decmax"]
-            hints.dec_center = bounds["dec_center"]
-            hints.pixscale = bounds["pixscale"]
-            hints.parity = bounds["parity"]
-            hints.scale = scale_factor
+    with luddcam_astrometry.Astrometry() as solver:
+        bounds = solver.solve_field(centroids, width, height, pos_hint, scale_hint, parity_hint)
+        if not bounds and parity_hint:
+            # if we had some hints and it still failed, try with reduced
+            # hints. The only way to reset after this is to go into the
+            # menu and come back, e.g. if the user changed the
+            # backspacing or optics.
+            bounds = solver.solve_field(centroids, width, height, None, scale_hint, parity_hint)
+        # to get a starting point
+        if not bounds:
+            return False, None, None, None, None
+        #print(bounds)
+        ra_min = bounds["ramin"]
+        ra_max = bounds["ramax"]
+        hints.ra_center = bounds["ra_center"]
+        dec_min = bounds["decmin"]
+        dec_max = bounds["decmax"]
+        hints.dec_center = bounds["dec_center"]
+        hints.pixscale = bounds["pixscale"]
+        hints.parity = bounds["parity"]
 
-            if pixel_size:
-                hints.focal_length = round((scale_factor * pixel_size / hints.pixscale) * 206.265)
-                # print(f"focal_length = {focal_length}")
+        if pixel_size:
+            hints.focal_length = round((scale_factor * pixel_size / hints.pixscale) * 206.265)
+            # print(f"focal_length = {focal_length}")
 
-            print(f"plate solved at {hints.ra_center},{hints.dec_center} scale {hints.pixscale} with {hints.focal_length}mm")
+        print(f"plate solved at {hints.ra_center},{hints.dec_center} scale {hints.pixscale} with {hints.focal_length}mm")
 
-            match polar_align:
-                case None:
-                    stars = luddcam_catalog.relevant_stars(dec_min, dec_max, ra_min, ra_max)
-                    dsos = luddcam_catalog.relevant_dsos(dec_min, dec_max, ra_min, ra_max)
-                    relevant_stars = solver.with_radec_to_pixels(stars)
-                    relevant_dsos = solver.with_radec_to_pixels(dsos)
-                case ((ra1, dec1), None):
-                    ras = [(ra, dec1) for ra in np.linspace(ra_min, ra_max, 100)]
-                    polar_alignment_points = [tuple(a) for a in solver.radec_to_pixels(ras)]
-                case ((ra1, dec1), (ra2, dec2)):
-                    targets = [
-                        # where we probed
-                        (ra2, dec2),
-                        # where to go
-                        (ra2, (dec1 + dec2) / 2)
-                    ]
-                    polar_alignment_targets = [tuple(a) for a in solver.radec_to_pixels(targets)]
+        match polar_align:
+            case None:
+                stars = luddcam_catalog.relevant_stars(dec_min, dec_max, ra_min, ra_max)
+                dsos = luddcam_catalog.relevant_dsos(dec_min, dec_max, ra_min, ra_max)
+                relevant_stars = solver.with_radec_to_pixels(stars)
+                relevant_dsos = solver.with_radec_to_pixels(dsos)
+            case ((ra1, dec1), None):
+                ras = [(ra, dec1) for ra in np.linspace(ra_min, ra_max, 100)]
+                polar_alignment_points = [tuple(a) for a in solver.radec_to_pixels(ras)]
+            case ((ra1, dec1), (ra2, dec2)):
+                targets = [
+                    # where we probed
+                    (ra2, dec2),
+                    # where to go
+                    (ra2, (dec1 + dec2) / 2)
+                ]
+                polar_alignment_targets = [tuple(a) for a in solver.radec_to_pixels(targets)]
 
     return True, relevant_stars, relevant_dsos, polar_alignment_points, polar_alignment_targets
 
@@ -916,7 +976,7 @@ class Menu:
         # action menu. We might want to allow UP/DOWN (or X/Y)
         # shortcuts one day.
         def select_mode(a, mode):
-            print(f"setting mode to {mode}")
+            #print(f"setting mode to {mode}")
             self.capture.set_mode(mode)
 
         items = [("Single", Mode.SINGLE), ("Repeat", Mode.REPEAT)]
@@ -939,6 +999,18 @@ class Menu:
             state_text=('Off', 'Live'),
             onchange=select_plate_solve,
             state_color=(BLACK, BLACK),
+            align=ALIGN_LEFT)
+
+        def select_live_cap(a, val):
+            with self.capture.lock:
+                self.capture.live_cap = val
+
+        live_exposure_options = [1, 2, 3, 4, 5]
+        menu.add.selector(
+            "Live limit: ",
+            items = [(luddcam_settings.exposure_render(i), i) for i in live_exposure_options],
+            default=live_exposure_options.index(self.capture.live_cap),
+            onchange=select_live_cap,
             align=ALIGN_LEFT)
 
         return menu
@@ -972,6 +1044,7 @@ class Menu:
             return
 
         stage = self.capture.get_stage()
+        #mode = self.capture.get_mode()
 
         for event in events:
             if self.screensaver and is_button(event):
@@ -1003,15 +1076,14 @@ class Menu:
                     backlight_off()
                     self.epaper.sleep()
             elif is_action(event):
-                if self.view.get_plate_solve():
+                if self.view.get_plate_solve() and stage is Stage.LIVE:
                     self.view.toggle_align()
                 else:
-                    # TODO zoom should be changed to a two stage process: first
-                    # click shows a box, arrows move around, second click goes in
-                    # (arrows still work). The settings should persist per camera.
-                    # we need a way to either reset or (preferred) visually
-                    # highlight that we're dead on center, maybe by showing a faded
-                    # version of the center view.
+                    # TODO when in planetary mode, zoom should go to the
+                    # auto-selected planetary object. up/down should change the
+                    # size of the FOV and left/right should go to the
+                    # next/previous object. If two objects fit within a frame,
+                    # we should add their CoM as a selectable option.
                     self.zoom = self.view.toggle_zoom()
 
         if not self.screensaver:
@@ -1021,16 +1093,14 @@ class Menu:
 # an rgb image (retaining the original bittype) and an (optional) float32 mono
 # variant.
 #
-# we might want to consider returning the mono image prior to binning, to improve
-# the chances of a good plate solve. But this will mean handling the ratios
-# in the caller.
-#
 # this can be surprisingly computationally expensive if we are not careful,
 # so we aim for speed above quality. General rescaling with nearest neighbour
 # turned out to be pretty bad quality (and certainly not worth the CPU).
 #
 # zoom means to crop to the target size (uses higher quality debayer)
-def downscale(mono, target_width, target_height, zoom, bayer, gray):
+#
+# Tries to return a mono equivalent if possible.
+def downscale(mono, target_width, target_height, zoom, bayer):
     height, width = mono.shape
     if target_height > height or target_width > width:
         raise ValueError(f"downscale doesn't upscale ({mono.shape} => ({height},{width}))")
@@ -1041,27 +1111,19 @@ def downscale(mono, target_width, target_height, zoom, bayer, gray):
         mono = mono[starty:starty + target_height, startx:startx + target_width]
         if bayer:
             # doesn't downsample
-            rgb = debayer_quality(mono, bayer)
+            return debayer_quality(mono, bayer), mono
     else:
         if bayer:
             # downsamples
             rgb = debayer_fast(mono, bayer)
-            rgb = pixel_bin(rgb, target_width, target_height)
+            return pixel_sample(rgb, target_width, target_height), None
         else:
-            mono = pixel_bin(mono, target_width, target_height)
-            rgb = np.stack([mono] * 3, axis=-1)
+            mono = pixel_sample(mono, target_width, target_height)
 
-    grayscale = None
-    if bayer:
-        if gray:
-            grayscale = rgb @ np.array([0.299, 0.587, 0.114])
-        return (rgb, grayscale)
-    else:
-        if gray:
-            grayscale = rgb[:, :, 0].astype(np.float32)
-        return (rgb, grayscale)
+    return np.stack([mono] * 3, axis=-1), mono
 
 # bins (averages) pixels until the img fits within the target size
+# this looks good but is much slower than sampling.
 def pixel_bin(img, target_width, target_height):
     height, width = img.shape[:2]
     if width > target_width or height > target_height:
@@ -1071,6 +1133,14 @@ def pixel_bin(img, target_width, target_height):
         img = (trimmed[0::2, 0::2] + trimmed[0::2, 1::2] +
                trimmed[1::2, 0::2] + trimmed[1::2, 1::2]) // 4
         return pixel_bin(img, target_width, target_height)
+    return img
+
+# much faster alternative to pixel_bin that throws data away
+def pixel_sample(img, target_width, target_height):
+    height, width = img.shape[:2]
+    if width > target_width or height > target_height:
+        img = img[0::2, 0::2]
+        return pixel_sample(img, target_width, target_height)
     return img
 
 # quantizes an image to 8 bits with astro specific noise/saturation
@@ -1380,12 +1450,13 @@ if __name__ == "__main__":
     font = pygame.font.Font(luddcam_settings.hack, 14)
 
     hints = SolverHints()
-    hints.ra_center = 10.70998331
-    hints.dec_center = 41.256808731
-    hints.pixscale = 16.477246715
-    hints.focal_length = 595
+    # hints.ra_center = 10.70998331
+    # hints.dec_center = 41.256808731
+    # hints.pixscale = 16.477246715
+    # hints.focal_length = 595
 
-    align = ((0, 41.5), None)
+    align = None
+    #align = ((0, 41.5), None)
     #align = ((0, 41.5), (10.7, 41.3))
 
     start = time.perf_counter()

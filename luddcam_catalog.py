@@ -8,10 +8,16 @@ def parse_siril_catalog(name, base="catalogs/", prefer_alias = True):
         for row in csv.DictReader(f):
             row["ra"] = float(row["ra"])
             row["dec"] = float(row["dec"])
-            if val := row.get("mag"):
-                row["mag"] = float(val)
-            if val := row.get("diameter"):
-                row["diameter"] = float(val)
+            match row.get("mag"):
+                case "":
+                    del row["mag"]
+                case val if val is not None:
+                    row["mag"] = float(val)
+            match row.get("diameter"):
+                case "":
+                    del row["diameter"]
+                case val if val is not None:
+                    row["diameter"] = float(val)
             rows.append(row)
         return rows
 

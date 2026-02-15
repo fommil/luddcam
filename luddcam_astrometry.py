@@ -7,17 +7,17 @@ import subprocess
 import tempfile
 import time
 
-# FIXME maybe make this a setting and allow it to be tuned e.g. for the
-# hemisphere and night's RA or month, it definitely speeds things up. the
-# default value could be the current month from the untrustworthy clock that
-# might be reasonably up to date.
+# TODO make this a setting and allow it to be tuned e.g. for the hemisphere and
+# night's RA or month, it definitely speeds things up. the default value could
+# be the current month from the untrustworthy clock that might be reasonably up
+# to date.
 #
 # can be northern, southern, or empty
 #
 # an even better optimisation here would be if we had the user's exact
 # location and time, then we could limit the search to just the objects
 # overhead within a tighter tolerance.
-hemisphere = os.environ.get('HEMISPHERE', '').lower()
+hemisphere = "northern" #os.environ.get('HEMISPHERE', '').lower()
 
 # We prefer to do the source extraction in python so that we don't
 # have to deal with large fits files on disk just to interact with
@@ -37,8 +37,8 @@ def source_extract(data):
     #print(bkg.globalrms)
     data_sub = data - bkg
     start = time.perf_counter()
-    # 3 with disabled kernel speeds things up
-    objects = sep.extract(data_sub, 3, err=bkg.globalrms, filter_kernel=None)
+    # higher threshold with disabled kernel speeds things up
+    objects = sep.extract(data_sub, 5, err=bkg.globalrms, filter_kernel=None)
     # sorted by descending flux
     end = time.perf_counter()
     print(f"extract took {end-start} for {len(objects)} objects")

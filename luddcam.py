@@ -86,7 +86,7 @@ def main():
     if pygame.display.get_driver() == "x11":
         surface = pygame.display.set_mode((800, 600))
     elif epaper.size():
-        surface = pygame.display.set_mode()
+        surface = pygame.display.set_mode(epaper.size())
     else:
         surface = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
 

@@ -263,6 +263,24 @@ class AsiCamera2:
             cameras.append(Camera(self.lib, i))
         return cameras
 
+# one might expect this to be the pattern mapping... lol
+BAYER_PATTERN_TOPDOWN = {
+    ASI_BAYER_PATTERN.ASI_BAYER_RG: "RGGB",
+    ASI_BAYER_PATTERN.ASI_BAYER_BG: "BGGR",
+    ASI_BAYER_PATTERN.ASI_BAYER_GR: "GRBG",
+    ASI_BAYER_PATTERN.ASI_BAYER_GB: "GBRG",
+}
+
+# however zwo seem to give us the pattern once we flip the data. So if we're
+# (correctly) writing the ROWORDER as BOTTOM-UP then we need to correct their
+# "helpful" convention and use this instead.
+BAYER_PATTERN_BOTTOMUP = {
+    ASI_BAYER_PATTERN.ASI_BAYER_RG: "GBRG",
+    ASI_BAYER_PATTERN.ASI_BAYER_BG: "GRBG",
+    ASI_BAYER_PATTERN.ASI_BAYER_GR: "BGGR",
+    ASI_BAYER_PATTERN.ASI_BAYER_GB: "RGGB",
+}
+
 # the Camera duck api
 #
 # read only parameters:
@@ -315,14 +333,7 @@ class Camera:
         # print(f"{self.info}")
 
         if self.info.IsColorCam == ASI_BOOL.ASI_TRUE:
-            if self.info.BayerPattern == ASI_BAYER_PATTERN.ASI_BAYER_RG:
-                self.bayer = "RGGB"
-            elif self.info.BayerPattern == ASI_BAYER_PATTERN.ASI_BAYER_BG:
-                self.bayer = "BGGR"
-            elif self.info.BayerPattern == ASI_BAYER_PATTERN.ASI_BAYER_GR:
-                self.bayer = "GRBG"
-            elif self.info.BayerPattern == ASI_BAYER_PATTERN.ASI_BAYER_GB:
-                self.bayer = "GBRG"
+            self.bayer = BAYER_PATTERN_BOTTOMUP[self.info.BayerPattern]
 
         self.pixelsize = self.info.PixelSize
 

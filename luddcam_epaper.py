@@ -47,6 +47,8 @@ class Waveshare:
         return (self.epd.width, self.epd.height)
 
     def sync(self, surface):
+        assert surface.get_size() == self.size()
+
         # throttles to 1 second differences. If this is set too short
         # we can end up creating a backlog for ourselves.
         if time.monotonic() < self.last + 1.0 / mocks.warp:
