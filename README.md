@@ -63,14 +63,16 @@ Plate solving will only be enabled in `LIVE` and `SINGLE` mode to conserve power
 <img src="./test_data/osc/assertions/live_plate_e.png" width="30%">
 </p>
 
-When plate solving is enabled, we can check and correct our polar alignment. Press `A` to lock in the current DEC, then slew only the RA axis for 45 to 90 degrees (if your initial align was bad, you may need to move less than this). Then press `A` one more time to bring up a crosshair target on screen. Using only the alt/az screws on the mount's polar wedge to change where the scope is pointing, line up the cross hair to be dead center (as in this screenshot).
+When plate solving is enabled, we can check and correct our polar alignment. Press `A` to lock in the current DEC, then slew only the RA axis until the drift is at its largest (usually between 45° and 90°). Then press `A` one more time to bring up a crosshair target on screen. Using only the alt/az screws on the mount's polar wedge, center the cross hair (as in this screenshot).
 
 <p align="center">
 <img src="./test_data/osc/assertions/live_polar2.png" width="30%">
 <img src="./test_data/osc/assertions/live_polar2_e.png" width="30%">
 </p>
 
-Press `A` again to cancel polar alignment. You can do this as many times as you want to improve the accuracy of your alignment.
+Press `A` again to finish polar alignment. You can do this as many times as you want to improve the accuracy of your alignment.
+
+The mode (single, repeat, interval) can also be changed using the `LEFT` / `RIGHT` arrow key shortcut. Likewise, plate solving can be toggled with `UP`.
 
 All files are saved as (uncompressed) fits files and are flushed to disk, so once it says `SAVED` on the screen, it's physically on the drive. A DSLR style naming convention is used so that processing follows your standard workflow and all the fits headers you'd expect to see are there.
 
@@ -218,7 +220,7 @@ then turn it off and on again. You should see luddcam!
 - e-paper ✅
 - plate solving ✅
 - polar alignment ✅
-- focus helper
+- focus helper ✅
 - playback
 
 ### Gamma

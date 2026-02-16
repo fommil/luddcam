@@ -18,6 +18,7 @@ import luddcam_epaper
 import luddcam_settings
 import luddcam_capture
 import luddcam_guide
+import luddcam_playback
 
 from luddcam_settings import is_left, is_right, is_up, is_down, is_menu, is_start, is_action, is_back, is_button
 
@@ -65,8 +66,8 @@ def disable_mouse():
 
 class Mode(IntEnum):
     SETTINGS = 0
-    CHOOSE   = 1
-    CAPTURE  = 2
+    CAPTURE  = 1
+    PLAYBACK = 2
     GUIDE    = 3
 
 ready = threading.Event()
@@ -94,6 +95,7 @@ def main():
 
     settings_menu = luddcam_settings.Menu()
     capture_menu = None
+    playback_menu = None
     guide_menu = None
 
     # always start in settings, so we have to ack the camera etc and forces a
@@ -111,12 +113,7 @@ def main():
         mode = last
         epaper.hint()
 
-    choose_menu = luddcam_settings.mk_menu("Choose Mode")
-    choose_menu.add.vertical_margin(10)
-    choose_menu.add.button("Capture", action=lambda: push(Mode.CAPTURE), align=ALIGN_LEFT)
-    # choose_menu.add.button("Guide", action=lambda: push(Mode.GUIDE), align=ALIGN_LEFT)
-
-    capture_mode = None
+    capture_prefs = luddcam_capture.Prefs()
 
     ready.set()
 
@@ -146,7 +143,10 @@ def main():
                     settings_menu.camera_settings(),
                     settings_menu.wheel,
                     settings_menu.wheel_settings(),
-                    capture_mode)
+                    capture_prefs)
+                playback_menu = luddcam_playback.Menu(
+                    settings_menu.output_dir()
+                )
                 # guide_menu = luddcam_guide.Menu(
                 #     settings_menu.output_dir(),
                 #     settings_menu.guide
@@ -156,22 +156,39 @@ def main():
                 print("entering settings")
                 # TODO warning / ack about ending capture sessions
                 if capture_menu:
-                    capture_mode = capture_menu.get_mode()
-                    # print(f"capture will recover with {capture_mode}")
+                    capture_prefs = capture_menu.get_prefs()
                     capture_menu.cancel()
                 if guide_menu:
+                    # hmm... are we sure about this? we should maybe only cancel
+                    # the guiding if the guiding specific settings changed, or
+                    # at the very least take a transient snapshot of the state.
                     guide_menu.cancel()
                 push(Mode.SETTINGS)
 
-        if mode == Mode.SETTINGS:
-            settings_menu.update(events)
-        elif mode == Mode.CHOOSE:
-            choose_menu.update(events)
-            choose_menu.draw(surface)
-        elif mode == Mode.CAPTURE:
-            capture_menu.update(events)
-        elif mode == Mode.GUIDE:
-            guide_menu.update(events)
+        # modal .update() calls should return True if they acted on any
+        # UP/DOWN/LEFT/RIGHT event. This lets us interpret those events at the
+        # top level.
+        acted = False
+        match mode:
+            case Mode.SETTINGS:
+                settings_menu.update(events)
+                acted = True # never delegates
+            case Mode.CAPTURE:
+                acted = capture_menu.update(events)
+            case Mode.PLAYBACK:
+                acted = playback_menu.update(events)
+            case Mode.GUIDE:
+                acted = guide_menu.update(events)
+        if not acted:
+            for event in events:
+                if is_down(event):
+                    # note that this just changes what is receiving
+                    # update polls, it doesn't shut down the modes
+                    match mode:
+                        case Mode.CAPTURE:
+                            mode = Mode.PLAYBACK
+                        case Mode.PLAYBACK:
+                            mode = Mode.CAPTURE
 
         pygame.display.update()
         epaper.sync(surface)

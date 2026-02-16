@@ -65,10 +65,7 @@ snap("live_polar2")
 snap("live_polar2_e", epaper=True)
 
 # disable plate solving
-b()
-down()
-a()
-b()
+up() # with shortcut
 
 # selects REPEAT mode
 b()
@@ -104,9 +101,7 @@ snap("settings_4_set")
 select()
 
 # swap to intervals, 10 second exposures
-b() # enters mode selector, remembered repeat
-right()
-b() # alt way of exiting selector
+right() # uses arrow hotkey
 
 nothing(2)
 snap("live_intervals")
