@@ -10,6 +10,8 @@ import os
 import time
 import threading
 
+import luddcam_images
+
 # this will be set to a specific test path when running tests (truthy)
 test_mode = False
 
@@ -56,12 +58,9 @@ class Camera:
         self.offset = None
         self.gain = None
 
-        h = fitsio.FITS(exposures[0])[1].read_header()
+        _, h = luddcam_images.load_fits(exposures[0])
         # print(h)
-        self.bayer = h.get("BAYERPAT")
-        if self.bayer and h.get("ROWORDER") != 'BOTTOM-UP':
-            self.bayer = self.bayer[2:4] + self.bayer[0:2]
-
+        self.bayer = luddcam_images.get_corrected_bayer(h)
         self.pixelsize = float(h["XPIXSZ"])
         # probably lost from the originals, not a standard
         self.bitdepth = h.get("BITDEPTH") or 14
@@ -81,7 +80,7 @@ class Camera:
             elif len(parts) == 1:
                 gain = None
                 exposure = float(parts[0])
-            img = np.flipud(fitsio.FITS(e)[1].read())
+            img, _ = luddcam_images.load_fits(e)
             #print(f"registering data for {(gain, exposure)}")
             self.data[(gain, exposure)] = img
 

@@ -158,6 +158,8 @@ def main():
                 if capture_menu:
                     capture_prefs = capture_menu.get_prefs()
                     capture_menu.cancel()
+                if playback_menu:
+                    playback_menu.cancel()
                 if guide_menu:
                     # hmm... are we sure about this? we should maybe only cancel
                     # the guiding if the guiding specific settings changed, or
@@ -188,6 +190,7 @@ def main():
                         case Mode.CAPTURE:
                             mode = Mode.PLAYBACK
                         case Mode.PLAYBACK:
+                            playback_menu.reset()
                             mode = Mode.CAPTURE
 
         pygame.display.update()

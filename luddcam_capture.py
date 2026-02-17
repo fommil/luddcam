@@ -38,7 +38,6 @@ from fractions import Fraction
 from pathlib import Path
 import math
 import os
-import pathlib
 import re
 import shutil
 import subprocess
@@ -47,7 +46,6 @@ import threading
 import traceback
 import time
 
-import fitsio
 import numpy as np
 import pygame
 
@@ -287,7 +285,10 @@ class Capture:
             if capture_interval_idx:
                 index, sub = capture_interval_idx
                 steps = len(self.camera_settings.intervals)
-                interval_info = f"sub {sub} in step {index + 1} of {steps}"
+                if stage is Stage.LIVE:
+                    interval_info = f"{steps} steps"
+                else:
+                    interval_info = f"{sub}|{index + 1}|{steps}"
             metadata_ = metadata + [("MODE", capture_mode),
                                     ("STAGE", capture_stage),
                                     ("IMAGE_COUNT", image_count),
@@ -523,7 +524,7 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
         #focus_magic = np.median(centroids["a"])
         focus_magic = np.average(centroids["a"], weights=centroids["flux"])
 
-    img_rgb = quantize(img_rgb, meta["EXPTIME"] >= 0.1)
+    img_rgb = quantize(img_rgb, meta.get("EXPTIME", 0) >= 1)
 
     # pygame expects (w,h,3) but everything else is (h,w,3)
     img_rgb = np.transpose(img_rgb, (1, 0, 2))
@@ -559,25 +560,17 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
         draw_dsos(img_surface, relevant_dsos, solver_hints.pixscale, font)
 
     def append_meta(s, key, prefix = "", suffix = "", align = True):
-        if (v := meta.get(key)):
-            if align:
-                s = tab(s)
-            if isinstance(v, float):
-                if v.is_integer():
-                    v = str(int(v))
-                else:
-                    frac = Fraction(v).limit_denominator(100000)
-                    v = f"{frac.numerator}/{frac.denominator}"
-            return s + prefix + str(v) + suffix
-        return s
+        return tab_append_lookup(meta, s, key, prefix, suffix, align)
 
     offset_v = (target_height - height) // 2
     offset_h = (target_width - width) // 2
-    surface.fill((0,0,0,0))
+    surface.fill(BLACK)
     surface.blit(img_surface, (offset_h, offset_v))
 
     # zoom should be minimal, it's really just for fine focus / framing
     if zoom:
+        # TODO add a timeseries graph of recent focus magic scores
+        # since live was enabled.
         if focus_magic:
             top_left = f"Focus magic: {focus_magic:.2f}"
             top_left_text = font.render(top_left, True, WHITE)
@@ -596,24 +589,15 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
         render_histogram(surface, hist, saturated, font, 10, 10)
 
     top_left = ""
-    if out:
-        top_left = tab(top_left) + pathlib.Path(out).name.split(".")[0]
-
-    top_left = append_meta(top_left, "EXPTIME", suffix = "s")
+    if stage is Stage.LIVE:
+        top_left = append_meta(top_left, "SINGLE_EXPTIME", suffix = "s")
+    else:
+        top_left = append_meta(top_left, "EXPTIME", suffix = "s")
     top_left = append_meta(top_left, "GAIN", prefix=" ", suffix = "cB", align=False) # centibel = 0.1dB
     top_left = append_meta(top_left, "FILTER", prefix=" ", align=False)
 
     if solver_hints and solver_hints.focal_length:
         top_left = tab(top_left) + f"{solver_hints.focal_length}mm"
-
-    if stage == Stage.LIVE:
-        top_left = tab(top_left) + stage.name
-    else:
-        top_left = tab(top_left) + mode.name
-        if mode != Mode.SINGLE:
-            # TODO when in interval it should be c/step_total of step/steps_total
-            # instead of infinity.
-            top_left = append_meta(top_left, "IMAGE_COUNT", prefix=" ", suffix="/∞", align=False)
 
     top_left_text = font.render(top_left, True, WHITE)
     top_left_rect = top_left_text.get_rect()
@@ -655,11 +639,8 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
     # bottom left should indicate what the shutter will do in LIVE
     bottom_left = ""
     if stage == Stage.LIVE:
-        bottom_left += "[" + mode.name
-        if mode is Mode.INTERVALS:
-            bottom_left = append_meta(bottom_left, "INTERVAL_INFO")
-        else:
-            bottom_left = append_meta(bottom_left, "SINGLE_EXPTIME", suffix = "s")
+        bottom_left = tab(bottom_left) + "[LIVE"
+        bottom_left = append_meta(bottom_left, "EXPTIME", suffix = "s")
         bottom_left += "]"
 
     bottom_left_text = font.render(bottom_left, True, WHITE)
@@ -669,16 +650,24 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
 
     # icons here might be nicer
     top_right = ""
-    if saved:
-        top_right = tab(top_right) + "SAVED"
+
     if paused:
         top_right = tab(top_right) + "PAUSED"
+    if saved:
+        top_right = tab(top_right) + "SAVED"
+    if out:
+        top_right = tab(top_right) + Path(out).name.split(".")[0]
 
-    if top_right:
-        text = font.render(top_right, True, WHITE)
-        rect = text.get_rect()
-        rect.topright = (target_width - 10, 10)
-        surface.blit(text, rect)
+    top_right = tab(top_right) + mode.name
+    if mode is Mode.INTERVALS:
+        top_right = append_meta(top_right, "INTERVAL_INFO", prefix=" ", align=False)
+    if mode != Mode.SINGLE:
+        top_right = append_meta(top_right, "IMAGE_COUNT", prefix=" ", suffix="/∞")
+
+    text = font.render(top_right, True, WHITE)
+    rect = text.get_rect()
+    rect.topright = (target_width - 10, 10)
+    surface.blit(text, rect)
 
 # transient preferences only valid for the session
 # (not persisted to the settings, but maybe one day)
@@ -700,6 +689,7 @@ class Prefs:
 
 class Menu:
     def __init__(self, epaper, output_dir, camera, camera_settings, wheel, wheel_settings, prefs):
+        self.screensaver = False
         mode = prefs.mode
         if not mode or (mode is Mode.INTERVALS and not camera_settings.intervals):
             mode = Mode.SINGLE
@@ -720,8 +710,6 @@ class Menu:
 
         self.capture = Capture(self.view, output_dir, camera, camera_settings, wheel, wheel_settings, mode)
         self.capture.start()
-
-        self.screensaver = False
 
     def mk_secondary_action_menu(self):
         menu = luddcam_settings.mk_menu("Capture")
@@ -879,8 +867,9 @@ if __name__ == "__main__":
     f = "test_data/osc/exposures/1.fit.fz"
     # sony a7iii is RGGB
 
-    h = fitsio.FITS(f)[1].read_header()
-    bayer = h.get("BAYERPAT")
+    img_raw, h = load_fits(f)
+
+    bayer = get_corrected_bayer(h)
     # print(f"BAYER={bayer}")
 
     # bayer = "RGGB"
@@ -897,7 +886,6 @@ if __name__ == "__main__":
     surface = pygame.Surface((800, 600))
     # flipping a fits image has the impact of getting us back to sensor
     # coordinates (zero is top left).
-    img_raw = np.flipud(fitsio.FITS(f)[1].read())
 
     zoom = False
     meta = {

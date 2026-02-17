@@ -45,6 +45,19 @@ def tab(s):
     #print(f"adding {need} spaces to '{s}'")
     return s + " " * need
 
+def tab_append_lookup(meta, s, key, prefix, suffix, align):
+    if (v := meta.get(key)):
+        if align:
+            s = tab(s)
+        if isinstance(v, float):
+            if v.is_integer():
+                v = str(int(v))
+            else:
+                frac = Fraction(v).limit_denominator(100000)
+                v = f"{frac.numerator}/{frac.denominator}"
+        return s + prefix + str(v) + suffix
+    return s
+
 def format_dms(degrees):
     negative = degrees < 0
     degrees = abs(degrees)
@@ -213,7 +226,7 @@ def draw_dsos(surface, dsos, pixscale, font):
 # zoom means to crop to the target size (uses higher quality debayer)
 #
 # Tries to return a mono equivalent if possible.
-def downscale(mono, target_width, target_height, zoom, bayer):
+def downscale(mono, target_width, target_height, zoom, bayer, quality = False):
     height, width = mono.shape
     if target_height > height or target_width > width:
         raise ValueError(f"downscale doesn't upscale ({mono.shape} => ({height},{width}))")
@@ -229,9 +242,14 @@ def downscale(mono, target_width, target_height, zoom, bayer):
         if bayer:
             # downsamples
             rgb = debayer_fast(mono, bayer)
+            if quality:
+                return pixel_bin(rgb, target_width, target_height), None
             return pixel_sample(rgb, target_width, target_height), None
         else:
-            mono = pixel_sample(mono, target_width, target_height)
+            if quality:
+                mono = pixel_bin(mono, target_width, target_height)
+            else:
+                mono = pixel_sample(mono, target_width, target_height)
 
     return np.stack([mono] * 3, axis=-1), mono
 
@@ -630,3 +648,22 @@ def save_fits(out, view, data, metadata, background = False):
         writer.run()
 
 have_fpack = shutil.which("fpack") is not None
+
+# returns the image (right way up) and headers.
+# be sure to use `get_corrected_bayer` to decode the bayer.
+def load_fits(f):
+    if f.endswith("z"):
+        fits = fitsio.FITS(f)[1]
+    else:
+        fits = fitsio.FITS(f)[0]
+
+    # bottom-up becomes top-down
+    img = np.flipud(fits.read())
+    h = fits.read_header()
+    return img, h
+
+def get_corrected_bayer(h):
+    bayer = h.get("BAYERPAT")
+    if bayer and h.get("ROWORDER") != 'BOTTOM-UP':
+        return bayer[2:4] + bayer[0:2]
+    return bayer

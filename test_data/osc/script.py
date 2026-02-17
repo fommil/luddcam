@@ -36,7 +36,14 @@ nothing(4)
 snap("capture_single_done")
 expect_images(1)
 
-# goes back to live
+# goes to playback
+down()
+snap("playback_1")
+snap("playback_1_e", epaper=True)
+down()
+# back to capture
+
+# still on the pause image, goes back to live
 b()
 nothing(2)
 snap("live_again")

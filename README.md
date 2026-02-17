@@ -16,6 +16,7 @@ Luddcam is designed to look and feel like a DSLR and requires a gamepad controll
 - `SELECT` is the menu
 - `A` is the primary action
 - `B` is the secondary action
+- `DOWN` changes modes (capture, playback, guiding)
 
 When Luddcam starts up, it drops into the menu allowing selection of the camera (or filter wheel if you have one). Left is what you see with an LCD screen, right if you have e-Paper (and are saving your night vision from attack):
 
@@ -37,12 +38,22 @@ When finished with the menu, press `SELECT` to go to the capture view, which wil
 <img src="./test_data/osc/assertions/live_capture_e.png" width="30%">
 </p>
 
- `A` can be used to zoom in to the central region which is excellent for focusing or mount star alignment.
+`A` can be used to zoom in to the central region which is excellent for focusing or mount star alignment.
 
 <p align="center">
 <img src="./test_data/osc/assertions/live_zoom.png" width="30%">
 <img src="./test_data/osc/assertions/live_zoom_e.png" width="30%">
 </p>
+
+By default images are rendered with an emphasis on speed (and battery saving) over quality, but we can jump to playback mode by pressing `DOWN`, which emphasises quality. We can browse all saved images with `LEFT` / `RIGHT` and zoom with `A`.
+
+<p align="center">
+<img src="./test_data/osc/assertions/playback_1.png" width="30%">
+<img src="./test_data/osc/assertions/playback_1_e.png" width="30%">
+</p>
+
+Press `DOWN` to return to the capture mode. Swapping modes with `DOWN` does not
+stop any ongoing captures.
 
 To take a single shot, press `START` (the shutter). It will remain on the screen until you press `B`, going back to `LIVE` mode, `A` to zoom, or `START` to take another capture.
 
@@ -52,11 +63,11 @@ Some useful information is shown on screen such as your exposure, file name, gai
 
 Histograms use a logarithm scale and are calculated across all the raw image pixels in their full bit depth. Also included is a count of saturated pixels (your hot pixels forever haunting you). Single shot mode is a great way to make sure you've dialled in your exposure lengths and gain.
 
-Once you're ready to start your session, press `B` to get back into `LIVE` mode, then `B` again to get a choice of `SINGLE` / `REPEAT` / `INTERVAL` modes. Here you can also enable plate solving to help greatly with finding and framing your target.
+Once you're ready to start your session, press `B` to get back into `LIVE` mode, then `B` again to get a choice of `SINGLE` / `REPEAT` / `INTERVAL` modes. Here you can also enable plate solving to help find your target if you're lost in space.
 
 <p align="center"><img src="./test_data/osc/assertions/secondary_menu.png" width="30%"></p>
 
-Plate solving will only be enabled in `LIVE` and `SINGLE` mode to conserve power. The first plate solve is the slowest, but will provide hints for future solves and any subsequent `.fits` files (speeding up plate solving in siril). This introduces a small amoutt of lag in the display of images.
+Plate solving is only enabled in `LIVE` and `SINGLE` mode to conserve power. The first plate solve is the slowest (usually taking a few seconds), but will provide hints for future solves and any subsequent `.fits` files. This introduces some lag in the display of images.
 
 <p align="center">
 <img src="./test_data/osc/assertions/live_plate.png" width="30%">
@@ -70,9 +81,9 @@ When plate solving is enabled, we can check and correct our polar alignment. Pre
 <img src="./test_data/osc/assertions/live_polar2_e.png" width="30%">
 </p>
 
-Press `A` again to finish polar alignment. You can do this as many times as you want to improve the accuracy of your alignment.
+Press `A` again to finish polar alignment. You can do this as many times as you want to improve the accuracy of your alignment. It is impossible to do this in a single step without knowing the site location and time of day, so doing this 2 or 3 times is recommended.
 
-The mode (single, repeat, interval) can also be changed using the `LEFT` / `RIGHT` arrow key shortcut. Likewise, plate solving can be toggled with `UP`.
+There are some shortcuts to save visiting the `B` menu: `LEFT` / `RIGHT` iterates the interval mode and `UP` will toggle plate solving.
 
 All files are saved as (uncompressed) fits files and are flushed to disk, so once it says `SAVED` on the screen, it's physically on the drive. A DSLR style naming convention is used so that processing follows your standard workflow and all the fits headers you'd expect to see are there.
 
@@ -221,7 +232,7 @@ then turn it off and on again. You should see luddcam!
 - plate solving ✅
 - polar alignment ✅
 - focus helper ✅
-- playback
+- playback ✅
 
 ### Gamma
 
