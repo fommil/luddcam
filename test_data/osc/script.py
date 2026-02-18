@@ -1,7 +1,6 @@
 # initial settings
 snap("settings_1")
 nothing(1)
-snap("settings_1e", epaper=True)
 
 # select filter wheel
 right()
@@ -23,12 +22,10 @@ select() # close settings, go to live view
 nothing(3)
 snap("live_capture")
 nothing(3)
-snap("live_capture_e", epaper=True)
 a() # initiate zoom
 nothing(3)
 snap("live_zoom")
 nothing(1)
-snap("live_zoom_e", epaper=True)
 a() # cancel zoom
 start() # single 2 second exposure
 #snap("capture_single_started")
@@ -38,8 +35,8 @@ expect_images(1)
 
 # goes to playback
 down()
+nothing(2)
 snap("playback_1")
-snap("playback_1_e", epaper=True)
 down()
 # back to capture
 
@@ -57,19 +54,16 @@ b()
 
 nothing(5)
 snap("live_plate")
-snap("live_plate_e", epaper=True)
 
 # enable polar alignment
 a()
 nothing(2)
 snap("live_polar1")
-snap("live_polar1_e", epaper=True)
 
 # polar alignment without moving
 a()
 nothing(2)
 snap("live_polar2")
-snap("live_polar2_e", epaper=True)
 
 # disable plate solving
 up() # with shortcut

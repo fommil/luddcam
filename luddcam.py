@@ -115,8 +115,6 @@ def main():
 
     capture_prefs = luddcam_capture.Prefs()
 
-    ready.set()
-
     while True:
         events = pygame.event.get()
         for event in events:
@@ -196,6 +194,7 @@ def main():
         pygame.display.update()
         epaper.sync(surface)
         clock.tick(FPS)
+        ready.set()
 
 if __name__ == '__main__':
     try:

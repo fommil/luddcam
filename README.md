@@ -10,28 +10,33 @@ If you want to take the best picture possible, and squeeze every ounce of perfor
 
 # User Guide
 
-Luddcam is designed to look and feel like a DSLR and requires a gamepad controller for input:
+Luddcam is designed to look and feel like a DSLR and requires a gamepad controller for input. The interface is intuitive and consistent:
 
-- `START` is the shutter
-- `SELECT` is the menu
-- `A` is the primary action
-- `B` is the secondary action
-- `DOWN` changes modes (capture, playback, guiding)
+<img src="https://upload.wikimedia.org/wikipedia/commons/thumb/3/30/Nes_controller.svg/960px-Nes_controller.svg.png" width="300" align="right"/>
+
+- `START` is reserved exclusively for the shutter
+- `SELECT` to enter / exit the settings menu
+- `A` is the context specific primary action
+- `B` is the context specific menu
+- `DOWN` changes context (capture, playback, guiding)
 
 When Luddcam starts up, it drops into the menu allowing selection of the camera (or filter wheel if you have one). Left is what you see with an LCD screen, right if you have e-Paper (and are saving your night vision from attack):
 
 <p align="center">
 <img src="./test_data/osc/assertions/settings_1.png" width="30%">
-<img src="./test_data/osc/assertions/settings_1e.png" width="30%">
+<img src="./test_data/osc/assertions/settings_1_e.png" width="30%">
 </p>
 
-The direction buttons work as expected with up/down to select a menu entry and left/right to change it. Left/right is used to go through all the menus, e.g. to change the exposure length (with quick buttons for bias/flats/dso) and gain
+The direction buttons work as expected with `UP` / `DOWN` to select a menu entry and `LEFT` / `RIGHT` to change it. `LEFT` / `RIGHT` when on the title will cycle the submenus, e.g. to change the exposure length (with quick buttons for bias/flats/dso selectable with `A`) and gain
 
-<p align="center"><img src="./test_data/osc/assertions/settings_3.png" width="30%"></p>
+<p align="center">
+<img src="./test_data/osc/assertions/settings_3.png" width="30%">
+<img src="./test_data/osc/assertions/settings_3_e.png" width="30%">
+</p>
 
 or to label the filter wheel positions and create interval plans.
 
-When finished with the menu, press `SELECT` to go to the capture view, which will be `LIVE` by default (capped to a few seconds maximum exposure). To return to the menu at any moment, press `SELECT`.
+When finished with the menu, press `SELECT` to go to the capture view, which will be LIVE by default (capped to a few seconds maximum exposure). To return to the menu at any moment, press `SELECT`.
 
 <p align="center">
 <img src="./test_data/osc/assertions/live_capture.png" width="30%">
@@ -45,29 +50,34 @@ When finished with the menu, press `SELECT` to go to the capture view, which wil
 <img src="./test_data/osc/assertions/live_zoom_e.png" width="30%">
 </p>
 
-By default images are rendered with an emphasis on speed (and battery saving) over quality, but we can jump to playback mode by pressing `DOWN`, which emphasises quality. We can browse all saved images with `LEFT` / `RIGHT` and zoom with `A`.
+To take a SINGLE shot, press `START` (the shutter). It will remain on the screen until you press `B`, going back to LIVE mode, `A` to zoom, or `START` to take another capture. The quality of zoomed and review images is noticably higher; the full LIVE view uses a tradeoff that optimizes for latency and battery usage.
+
+<p align="center">
+<img src="./test_data/osc/assertions/capture_single_done.png" width="30%">
+<img src="./test_data/osc/assertions/capture_single_done_e.png" width="30%">
+</p>
+
+Some useful information is shown on screen such as your exposure, file name, gain and position in the sequence. The preview is automatically stretched with arcsinh to make it easier to frame the shot.
+
+We can review all the images we have captured by pressing `DOWN` to go to the playback context. `LEFT` / `RIGHT` moves between images.
 
 <p align="center">
 <img src="./test_data/osc/assertions/playback_1.png" width="30%">
 <img src="./test_data/osc/assertions/playback_1_e.png" width="30%">
 </p>
 
-Press `DOWN` to return to the capture mode. Swapping modes with `DOWN` does not
-stop any ongoing captures.
+Press `DOWN` to return to the capture context. Swapping contexts with `DOWN` does not stop any ongoing captures.
 
-To take a single shot, press `START` (the shutter). It will remain on the screen until you press `B`, going back to `LIVE` mode, `A` to zoom, or `START` to take another capture.
+Histograms use a logarithm scale and are calculated across all the raw image pixels in their full bit depth. Also included is a count of saturated pixels (your hot pixels forever haunting you). SINGLE shot mode is a great way to make sure you've dialled in your exposure lengths and gain.
 
-Some useful information is shown on screen such as your exposure, file name, gain and position in the sequence. The preview is automatically stretched with arcsinh to make it easier to frame the shot.
+Once you're ready to start your session, press `B` to get back into LIVE mode, then `B` again to get a choice of SINGLE / REPEAT / INTERVAL. Here you can also enable plate solving to help find your target if you're lost in space.
 
-<p align="center"><img src="./test_data/osc/assertions/capture_repeat_done.png" width="30%"></p>
+<p align="center">
+<img src="./test_data/osc/assertions/secondary_menu.png" width="30%">
+<img src="./test_data/osc/assertions/secondary_menu_e.png" width="30%">
+</p>
 
-Histograms use a logarithm scale and are calculated across all the raw image pixels in their full bit depth. Also included is a count of saturated pixels (your hot pixels forever haunting you). Single shot mode is a great way to make sure you've dialled in your exposure lengths and gain.
-
-Once you're ready to start your session, press `B` to get back into `LIVE` mode, then `B` again to get a choice of `SINGLE` / `REPEAT` / `INTERVAL` modes. Here you can also enable plate solving to help find your target if you're lost in space.
-
-<p align="center"><img src="./test_data/osc/assertions/secondary_menu.png" width="30%"></p>
-
-Plate solving is only enabled in `LIVE` and `SINGLE` mode to conserve power. The first plate solve is the slowest (usually taking a few seconds), but will provide hints for future solves and any subsequent `.fits` files. This introduces some lag in the display of images.
+Plate solving is only enabled in LIVE and SINGLE mode to conserve power. The first plate solve is the slowest (usually taking a few seconds), but will provide hints for future solves and any subsequent `.fits` files. This introduces some lag in the display of images.
 
 <p align="center">
 <img src="./test_data/osc/assertions/live_plate.png" width="30%">
@@ -81,9 +91,9 @@ When plate solving is enabled, we can check and correct our polar alignment. Pre
 <img src="./test_data/osc/assertions/live_polar2_e.png" width="30%">
 </p>
 
-Press `A` again to finish polar alignment. You can do this as many times as you want to improve the accuracy of your alignment. It is impossible to do this in a single step without knowing the site location and time of day, so doing this 2 or 3 times is recommended.
+Press `A` again to finish polar alignment. You can do this as many times as you want to improve the accuracy of your alignment. It is impossible to do this in one step without knowing the alt/az geometry (which could be inferred from the location and time of day if GPS were available), so doing this 2 or 3 times is recommended.
 
-There are some shortcuts to save visiting the `B` menu: `LEFT` / `RIGHT` iterates the interval mode and `UP` will toggle plate solving.
+Advanced: `LEFT` / `RIGHT` are shortcuts to cycle through the capture modes and `UP` will toggle plate solving.
 
 All files are saved as (uncompressed) fits files and are flushed to disk, so once it says `SAVED` on the screen, it's physically on the drive. A DSLR style naming convention is used so that processing follows your standard workflow and all the fits headers you'd expect to see are there.
 

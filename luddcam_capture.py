@@ -481,7 +481,9 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
 
     start = time.perf_counter()
     bayer = meta.get("BAYERPAT")
-    img_rgb, img_mono = downscale(img_raw, target_width, target_height, zoom, bayer)
+    long_exposure = meta.get("EXPTIME", 0) >= 1
+    render_quality = stage is not Stage.LIVE and long_exposure
+    img_rgb, img_mono = downscale(img_raw, target_width, target_height, zoom, bayer, render_quality)
     height, width, _ = img_rgb.shape
     end = time.perf_counter()
     print(f"downscale took {end - start}")
@@ -524,7 +526,7 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
         #focus_magic = np.median(centroids["a"])
         focus_magic = np.average(centroids["a"], weights=centroids["flux"])
 
-    img_rgb = quantize(img_rgb, meta.get("EXPTIME", 0) >= 1)
+    img_rgb = quantize(img_rgb, long_exposure)
 
     # pygame expects (w,h,3) but everything else is (h,w,3)
     img_rgb = np.transpose(img_rgb, (1, 0, 2))

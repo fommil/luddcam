@@ -226,7 +226,7 @@ def draw_dsos(surface, dsos, pixscale, font):
 # zoom means to crop to the target size (uses higher quality debayer)
 #
 # Tries to return a mono equivalent if possible.
-def downscale(mono, target_width, target_height, zoom, bayer, quality = False):
+def downscale(mono, target_width, target_height, zoom, bayer, quality):
     height, width = mono.shape
     if target_height > height or target_width > width:
         raise ValueError(f"downscale doesn't upscale ({mono.shape} => ({height},{width}))")
@@ -241,9 +241,10 @@ def downscale(mono, target_width, target_height, zoom, bayer, quality = False):
     else:
         if bayer:
             # downsamples
-            rgb = debayer_fast(mono, bayer)
             if quality:
+                rgb = debayer_fastish(mono, bayer)
                 return pixel_bin(rgb, target_width, target_height), None
+            rgb = debayer_fast(mono, bayer)
             return pixel_sample(rgb, target_width, target_height), None
         else:
             if quality:

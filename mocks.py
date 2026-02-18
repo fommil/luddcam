@@ -9,6 +9,7 @@ import numpy as np
 import os
 import time
 import threading
+import PIL
 
 import luddcam_images
 
@@ -134,7 +135,7 @@ class EPD:
         self.display(buf)
 
     def Clear(self):
-        self.display(None)
+        self.display(PIL.Image.new(epd_buf.mode, epd_buf.size, 0))
 
     def sleep(self):
         pass

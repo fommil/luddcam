@@ -17,8 +17,10 @@ import luddcam
 import luddcam_settings
 
 def nothing(s):
+    luddcam.ready.clear()
     t = s / mocks.warp
     time.sleep(max(t, 1.0 / luddcam.FPS + 0.01))
+    luddcam.ready.wait()
 
 def key(k, i = 1):
     while i > 0:
@@ -61,8 +63,13 @@ def expect_images(n, retries=10):
         return expect_images(n, retries=retries-1)
     assert got == n, f"expected {n} fits files, got {got}"
 
-def snap(name, tolerance=10, retries=5, epaper=False):
-    f = f"test_data/{mocks.test_mode}/assertions/{name}.png"
+def snap(name, tolerance=10, retries=5):
+    snap_(name, tolerance, retries, False)
+    snap_(name, tolerance, retries, True)
+
+def snap_(name, tolerance, retries, epaper):
+    suffix = "_e" if epaper else ""
+    f = f"test_data/{mocks.test_mode}/assertions/{name}{suffix}.png"
     if epaper:
         image = mocks.epd_buf.convert("RGB")
         current = pygame.image.fromstring(image.tobytes(), image.size, 'RGB')
@@ -79,13 +86,13 @@ def snap(name, tolerance=10, retries=5, epaper=False):
                 # exact timing is flakey, this buys us some runway
                 print("FAILED screenshot test with retry")
                 nothing(1)
-                return snap(name, tolerance, retries-1, epaper)
+                return snap_(name, tolerance, retries-1, epaper)
 
-            ff = f"test_data/{mocks.test_mode}/failures/{name}.png"
+            ff = f"test_data/{mocks.test_mode}/failures/{name}{suffix}.png"
             pygame.image.save(current, ff)
 
             diffs = surface_with_diff(current, ref, tolerance)
-            fff = f"test_data/{mocks.test_mode}/failures/{name}_diffs.png"
+            fff = f"test_data/{mocks.test_mode}/failures/{name}{suffix}_diffs.png"
             # unfortunately this saves the most recent one, so can be fiddly
             pygame.image.save(diffs, fff)
             subprocess.Popen(["feh", "--force-aliasing", fff], start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
