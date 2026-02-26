@@ -28,7 +28,7 @@ hemisphere = "northern" #os.environ.get('HEMISPHERE', '').lower()
 # without having to plate solve.
 #
 # https://github.com/sep-developers/sep/issues/172
-def source_extract(data):
+def source_extract(data, cull = 30):
     start = time.perf_counter()
     bkg = sep.Background(data)
     end = time.perf_counter()
@@ -42,9 +42,21 @@ def source_extract(data):
     # sorted by descending flux
     end = time.perf_counter()
     print(f"extract took {end-start} for {len(objects)} objects")
-    # then trim, to speed up plate solving significantly
+    # removes things that are definitely not stars
+    objects = objects[objects['b'] / objects['a'] > 0.8]
+    # sort by descending flux
     objects = objects[np.argsort(objects["flux"])[::-1]]
-    objects = objects[:50]
+    # then cull
+    if cull and cull > 0:
+        objects = objects[:cull]
+
+    # supposedly improves centroids but doesn't seem to matter for plate solving
+    #
+    # sig = objects['a'] * 0.5
+    # xwin, ywin, flag = sep.winpos(data, objects['x'], objects['y'], sig)
+    # objects['x'] = xwin
+    # objects['y'] = ywin
+
     return objects
 
 class Astrometry:

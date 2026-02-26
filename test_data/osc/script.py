@@ -101,6 +101,9 @@ up(3)
 snap("settings_4_set")
 select()
 
+# note we lost the plate solve by going into the settings menu
+# (intentional, but maybe we could be smarter about that)
+
 # swap to intervals, 10 second exposures
 right() # uses arrow hotkey
 

@@ -1,5 +1,6 @@
 # https://indilib.org/forum/development/15497-zwo-unity-gain-and-offset-calculations.html
 
+import atexit
 from ctypes import *
 from enum import IntEnum
 import itertools
@@ -227,11 +228,11 @@ class AsiCamera2:
         self.lib.ASISetStartPos.restype = c_int
         self.lib.ASISetStartPos.argtypes = [c_int, c_int, c_int]
 
-        # self.lib.ASIPulseGuideOn.restype = c_int
-        # self.lib.ASIPulseGuideOn.argtypes = [c_int, c_int]
+        self.lib.ASIPulseGuideOn.restype = c_int
+        self.lib.ASIPulseGuideOn.argtypes = [c_int, c_int]
 
-        # self.lib.ASIPulseGuideOff.restype = c_int
-        # self.lib.ASIPulseGuideOff.argtypes = [c_int, c_int]
+        self.lib.ASIPulseGuideOff.restype = c_int
+        self.lib.ASIPulseGuideOff.argtypes = [c_int, c_int]
 
         self.lib.ASIStartExposure.restype = c_int
         self.lib.ASIStartExposure.argtypes = [c_int, c_int]
@@ -253,6 +254,14 @@ class AsiCamera2:
 
         self.lib.ASIGetLMHGainOffset.restype = c_int
         self.lib.ASIGetLMHGainOffset.argtypes = [c_int, POINTER(c_int), POINTER(c_int), POINTER(c_int), POINTER(c_int)]
+
+        atexit.register(self.__del__)
+
+    def __del__(self):
+        for i in range(self.lib.ASIGetNumOfConnectedCameras()):
+            for d in ASI_GUIDE_DIRECTION:
+                self.lib.ASIPulseGuideOff(i, d)
+            self.lib.ASICloseCamera(i)
 
     def cameras(self):
         num_cameras = self.lib.ASIGetNumOfConnectedCameras()
@@ -302,6 +311,7 @@ BAYER_PATTERN_BOTTOMUP = {
 # get_temp() - current temp
 # set_cooling(temp)
 # set_gain(gain)
+# move_guide(axis1, axis2)
 #
 # capture_start(exposure) - returns immediately
 # capture_wait() - True if ready, False if processing, None if failed
@@ -341,9 +351,12 @@ class Camera:
         if self.name.startswith("ZWO ASI1600"):
             # older models had an ST4 port, sdk is wrong.
             self.guide = False
-        if self.name.startswith("ZWO ASI585"):
-            # you can technically guide with these, but, come on.
-            self.guide = False
+
+        # if it wasn't closed, open can fail
+        try:
+            self.lib.ASICloseCamera(self.i)
+        except Exception:
+            pass
 
         call(self.lib.ASIOpenCamera(self.i))
 
@@ -518,6 +531,52 @@ class Camera:
         if gain > self.gain_unity:
             return infer(self.gain_unity, self.gain_lrn, self.offset_unity, self.offset_lrn)
 
+    # sends pulse commands to both axis.
+    #
+    # the meaning of each axis is consistent across sessions.
+    #
+    # values are in seconds, negative values move in the opposite direction
+    # in that axis.
+    #
+    # blocks the caller
+    #
+    # this can only be called by one thread at a time
+    def move_guide(self, axis1, axis2):
+        assert self.guide
+        # the interactions of pulse on/off are undocumented. I'm assuming:
+        # NORTH/SOUTH and EAST/WEST are independent and controlled separately.
+        # flipping direction on a single axis should have an Off in between.
+        timer1 = abs(axis1)
+        timer2 = abs(axis2)
+        assert timer1 <= 2 and timer2 <= 2
+
+        dir1 = ASI_GUIDE_DIRECTION.ASI_GUIDE_NORTH if axis1 >= 0 else ASI_GUIDE_DIRECTION.ASI_GUIDE_SOUTH
+        dir2 = ASI_GUIDE_DIRECTION.ASI_GUIDE_EAST if axis2 >= 0 else ASI_GUIDE_DIRECTION.ASI_GUIDE_WEST
+
+        epsilon = 0.01
+
+        # A now becomes the thing we stop first
+        if timer1 <= timer2:
+            timerA, timerB = timer1, timer2
+            dirA, dirB = dir1, dir2
+        else:
+            timerA, timerB = timer2, timer1
+            dirA, dirB = dir2, dir1
+
+        self.lib.ASIPulseGuideOff(self.i, dirA)
+        self.lib.ASIPulseGuideOff(self.i, dirB)
+        if timerA > epsilon:
+            self.lib.ASIPulseGuideOn(self.i, dirA)
+        if timerB > epsilon:
+            self.lib.ASIPulseGuideOn(self.i, dirB)
+        if timerA > epsilon:
+            time.sleep(timerA)
+            self.lib.ASIPulseGuideOff(self.i, dirA)
+        if timerB - timerA > epsilon:
+            time.sleep(timerB - timerA)
+        if timerB > epsilon:
+            self.lib.ASIPulseGuideOff(self.i, dirB)
+
 class EFW_INFO(Structure):
     _fields_ = [
         ("ID", c_int),
@@ -643,37 +702,13 @@ def get_normalized_arch():
         return "unknown"
 
 # super weird, ZWO give the offsets for unity gain but not the unity gain value
-# so we have to figure them out from published data. collected by chatgpt from
-# forums.
+# so we have to figure them out from published data. Added on demand.
 def get_unity_gain(camera_name):
     model_map = {
-        "ASI120MM": 30, # 12 bit mode
-        "ASI120MC": 30, # 12 bit mode
-        "ASI220MM": 68,
-        "ASI220MC": 68,
-        "ASI1600MM": 139,
-        "ASI1600MC": 139,
-        "ASI294MM": 120,
-        "ASI294MC": 120,
-        "ASI183MM": 111,
-        "ASI183MC": 111,
-        "ASI174MM": 139,
-        "ASI174MC": 139,
-        "ASI533MM": 100,
-        "ASI533MC": 100,
-        "ASI2600MM": 100,
-        "ASI2600MC": 100,
-        "ASI6200MM": 100,
-        "ASI6200MC": 100,
-        "ASI2400MC": 100,
-        "ASI071MC": 90,
-        "ASI678MC": 90,
-        "ASI678MM": 90,
-        "ASI585MC": 180,
-        "ASI462MC": 230,
-        "ASI482MC": 160,
-        "ASI432MM": 160,
-        "ASI224MC": 252
+        "ASI120M": 30, # 12 bit mode
+        "ASI220M": 68,
+        "ASI1600M": 139,
+        "ASI585M": 195
     }
     for model, gain in model_map.items():
         if model in camera_name:

@@ -92,13 +92,18 @@ def plate_solve(hints, centroids, width, height, scale_factor, pixel_size, polar
     relevant_stars, relevant_dsos, polar_alignment_points, polar_alignment_targets = None, None, None, None
     with luddcam_astrometry.Astrometry() as solver:
         bounds = solver.solve_field(centroids, width, height, pos_hint, scale_hint, parity_hint)
-        if not bounds and parity_hint:
-            # if we had some hints and it still failed, try with reduced
-            # hints. The only way to reset after this is to go into the
-            # menu and come back, e.g. if the user changed the
-            # backspacing or optics.
+        if not bounds and hints.ra_center and hints.dec_center:
+            # if it still failed, try without the position hint
             bounds = solver.solve_field(centroids, width, height, None, scale_hint, parity_hint)
-        # to get a starting point
+        if not bounds:
+            # if this still fails, throw away some of the more aggressive hints.
+            # so we don't get into an infinite loop when the camera changes.
+            hints.pixscale = None
+            hints.parity = None
+            hints.focal_length = None # informational only
+            if scale_hint or parity_hint:
+                # one last go this time around
+                bounds = solver.solve_field(centroids, width, height, None, None, None)
         if not bounds:
             return False, None, None, None, None
         #print(bounds)
@@ -517,7 +522,7 @@ def render_histogram(surface, hist, saturated, font,
 
 BACKLIGHT_DIR = "/sys/class/backlight"
 def backlight_off(base=BACKLIGHT_DIR):
-    if not os.path.isdir(base):
+    if not is_rpi or os.path.isdir(base):
         return
     for dev in os.listdir(base):
         path = os.path.join(base, dev, "brightness")
@@ -526,6 +531,8 @@ def backlight_off(base=BACKLIGHT_DIR):
                 f.write(str(0))
 
 def backlight_on(base=BACKLIGHT_DIR):
+    if not is_rpi or os.path.isdir(base):
+        return
     for dev in os.listdir(base):
         path = os.path.join(base, dev, "brightness")
         path_m = os.path.join(base, dev, "max_brightness")
@@ -535,6 +542,14 @@ def backlight_on(base=BACKLIGHT_DIR):
         if os.path.exists(path):
             with open(path, "w") as f:
                 f.write(str(max_brightness))
+
+def is_raspberry_pi():
+    try:
+        with open('/proc/device-tree/model', 'r') as f:
+            return 'raspberry pi' in f.read().lower()
+    except OSError:
+        return False
+is_rpi = is_raspberry_pi()
 
 def mk_metadata(exp, camera, filt, cooling, plate):
     # note that fitsio seems to automatically set BZERO and BSCALE

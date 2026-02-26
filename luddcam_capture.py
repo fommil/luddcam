@@ -85,8 +85,7 @@ class Capture:
         self.mode = mode
         self.stage = Stage.STOP
         self.interval_idx = None
-
-        self.live_cap = 1
+        self.live_cap = None
 
         self.thread = threading.Thread(target=self.run, daemon=True, name="Capture")
 
@@ -343,7 +342,7 @@ class View:
 
         self.plate_solve = False
         self.align = None # ra, dec for the base then ra, dec for the test
-        self.hints = SolverHints()
+        self.hints = None
 
         self.font_large = pygame.font.Font(luddcam_settings.hack, 32)
         self.font_small = pygame.font.Font(luddcam_settings.hack, 14)
@@ -413,7 +412,7 @@ class View:
             is_paused = self.is_paused
             saved = self.saved
             plate_solve = self.plate_solve
-            hints = self.hints if plate_solve else None
+            hints = self.hints
             align = self.align
             # doing it here instead of after avoids many timing issues
             self.stale = False
@@ -428,7 +427,7 @@ class View:
                 surface.blit(text, rect)
         else:
             is_saved = saved == out
-            render_frame_for_screen(surface, img_raw, zoom, meta, out, self.font_small, is_paused, is_saved, hints, align)
+            render_frame_for_screen(surface, img_raw, zoom, meta, out, self.font_small, is_paused, is_saved, hints, align, plate_solve)
 
     def message(self, msg):
         self.set_data(None, msg, None)
@@ -469,14 +468,14 @@ class SolverHints:
 
 # moved out for easier manual testing. Mutates the solver_hints
 # on a successful plate solve.
-def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, saved, solver_hints, polar_align):
+def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, saved, solver_hints, polar_align, attempt_solve):
     raw_height, raw_width = img_raw.shape
     target_width, target_height = surface.get_size()
 
     mode = meta["MODE"]
     stage = meta["STAGE"]
 
-    solve = solver_hints is not None and not zoom and ((mode == Mode.SINGLE and saved) or stage == Stage.LIVE)
+    solve = attempt_solve and solver_hints is not None and not zoom and ((mode == Mode.SINGLE and saved) or stage == Stage.LIVE)
     polar_align = polar_align if solve and stage == Stage.LIVE else False
 
     start = time.perf_counter()
@@ -674,20 +673,18 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
 # transient preferences only valid for the session
 # (not persisted to the settings, but maybe one day)
 class Prefs:
-    def __init__(self, mode = None, live_cap = None, plate_solve = None, hints = None):
+    def __init__(self,
+                 mode = Mode.SINGLE,
+                 live_cap = 1,
+                 plate_solve = False,
+                 hints = SolverHints()):
         self.mode = mode
         self.live_cap = live_cap
         self.plate_solve = plate_solve
 
-        # only preserve the last position; camera can change
-        if hints:
-            self.hints = SolverHints()
-            if hints.ra_center is not None:
-                self.hints.ra_center = hints.ra_center
-            if hints.dec_center is not None:
-                self.hints.dec_center = hints.dec_center
-        else:
-            self.hints = None
+        # the camera can change which can mess all of this up,
+        # but we should recover from that.
+        self.hints = hints
 
 class Menu:
     def __init__(self, epaper, output_dir, camera, camera_settings, wheel, wheel_settings, prefs):
@@ -702,6 +699,8 @@ class Menu:
 
         self.epaper = epaper
         self.view = View(w, h)
+        self.view.hints = prefs.hints
+        self.view.plate_solve = prefs.plate_solve
         self.zoom = False # used to capture BACK
 
         self.menu = None
@@ -711,6 +710,7 @@ class Menu:
             return
 
         self.capture = Capture(self.view, output_dir, camera, camera_settings, wheel, wheel_settings, mode)
+        self.capture.live_cap = prefs.live_cap
         self.capture.start()
 
     def mk_secondary_action_menu(self):
@@ -838,7 +838,7 @@ class Menu:
                     # we should add their CoM as a selectable option. When in
                     # that mode we should disable event delegation.
                     self.zoom = self.view.toggle_zoom()
-            elif is_left(event) or is_right(event):
+            elif is_left(event) or is_right(event) and stage is not Stage.CAPTURE:
                 acted = True
                 if self.capture.camera_settings.intervals:
                     limit = len(Mode)
@@ -850,7 +850,7 @@ class Menu:
                     direction = 1
                 new_mode_idx = (self.capture.get_mode().value + direction) % limit
                 self.capture.set_mode(Mode(new_mode_idx))
-            elif is_up(event):
+            elif is_up(event) and stage is not Stage.CAPTURE:
                 acted = True
                 self.view.set_plate_solve(not self.view.get_plate_solve())
 
@@ -866,7 +866,10 @@ if __name__ == "__main__":
     # 3 minute dual band exposure
     # f = "test_data/osc/exposures/10.fit.fz"
     # actually a 30 second rgb exposure
-    f = "test_data/osc/exposures/1.fit.fz"
+    #f = "test_data/osc/exposures/1.fit.fz"
+    f = "tmp/guiding/Light_FOV_3.0s_Bin1_20250921-220306_0053.fit.fz"
+
+
     # sony a7iii is RGGB
 
     img_raw, h = load_fits(f)
@@ -891,13 +894,13 @@ if __name__ == "__main__":
 
     zoom = False
     meta = {
-        "BITDEPTH": 14,
+        "BITDEPTH": 16,
         "IMAGE_COUNT": 1,
         "EXPTIME": exp,
         "GAIN": 180.0,
         "FILTER": "L",
         "BAYERPAT": bayer,
-        "STAGE": Stage.LIVE,
+        "STAGE": Stage.PAUSE,
         "MODE": Mode.SINGLE,
         "XPIXSZ": 5.94
     }
@@ -910,12 +913,12 @@ if __name__ == "__main__":
     # hints.pixscale = 16.477246715
     # hints.focal_length = 595
 
-    #align = None
-    align = ((0, 41.5), None)
+    align = None
+    #align = ((0, 41.5), None)
     #align = ((0, 41.5), (10.7, 50))
 
     start = time.perf_counter()
-    render_frame_for_screen(surface, img_raw, zoom, meta, out, font, False, False, hints, align)
+    render_frame_for_screen(surface, img_raw, zoom, meta, out, font, False, False, hints, align, False)
     end = time.perf_counter()
     print(f"rendering took {end - start:.2f}")
 

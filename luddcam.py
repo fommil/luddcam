@@ -145,10 +145,11 @@ def main():
                 playback_menu = luddcam_playback.Menu(
                     settings_menu.output_dir()
                 )
-                # guide_menu = luddcam_guide.Menu(
-                #     settings_menu.output_dir(),
-                #     settings_menu.guide
-                # )
+                if settings_menu.guide:
+                    guide_menu = luddcam_guide.Menu(
+                        settings_menu.output_dir(),
+                        settings_menu.guide
+                    )
                 pop()
             elif mode > Mode.SETTINGS and is_menu(event):
                 print("entering settings")
@@ -189,6 +190,11 @@ def main():
                             mode = Mode.PLAYBACK
                         case Mode.PLAYBACK:
                             playback_menu.reset()
+                            if guide_menu:
+                                mode = Mode.GUIDE
+                            else:
+                                mode = Mode.CAPTURE
+                        case Mode.GUIDE:
                             mode = Mode.CAPTURE
 
         pygame.display.update()

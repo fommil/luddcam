@@ -1,5 +1,6 @@
 # touptek implementation of the Camera duck api
 
+import atexit
 import ctypes
 import math
 import numpy as np
@@ -17,13 +18,17 @@ from libtoupcam.python import toupcam
 
 class Toupcam:
     def __init__(self):
-        pass
+        atexit.register(self.__del__)
 
     def cameras(self):
         cameras = []
         for dev in toupcam.Toupcam.EnumV2():
             cameras.append(Camera(dev))
         return cameras
+
+    def __del__(self):
+        for dev in toupcam.Toupcam.EnumV2():
+            toupcam.Toupcam.Close(dev.id)
 
 # the touptek api is super weird. When we start a session we have to provide
 # a function to receive events. After various commands we have to wait for
@@ -49,10 +54,12 @@ class Camera:
         self.pixelsize = model.xpixsz
         self.is_cooled = model.flag & toupcam.TOUPCAM_FLAG_TEC
 
-        self.guide = bool(model.flag & toupcam.TOUPCAM_FLAG_ST4)
+        # TODO implement using the touptek st4 api for guiding
+        self.guide = False # bool(model.flag & toupcam.TOUPCAM_FLAG_ST4)
 
         self.d = dev
 
+        # if it wasn't closed by a previous process, an open will fail
         try:
             toupcam.Toupcam.Close(dev.id)
         except Exception:

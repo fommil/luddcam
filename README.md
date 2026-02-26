@@ -43,7 +43,7 @@ When finished with the menu, press `SELECT` to go to the capture view, which wil
 <img src="./test_data/osc/assertions/live_capture_e.png" width="30%">
 </p>
 
-`A` can be used to zoom in to the central region which is excellent for focusing or mount star alignment.
+`A` can be used to zoom in to the central region which is excellent for focusing or mount star alignment. The "focus magic" number measures the size of the stars in the zoomed region and can be used instead of (or complementing) a bahtinov mask.
 
 <p align="center">
 <img src="./test_data/osc/assertions/live_zoom.png" width="30%">
