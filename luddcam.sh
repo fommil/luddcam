@@ -41,10 +41,9 @@ case "${1:-}" in
         sudo apt install libasi python3-pygame python3-box python3-fitsio python3-sep udevil exfatprogs fonts-hack astrometry.net astrometry-data-tycho2
 
         if $IS_RPI ; then
-            # workaround old bugs in the udevil support for exfat, works on debian
+            # workaround bugs in the udevil support for exfat, works on debian
             sudo apt install exfat-fuse
             sudo ln -fs mount.exfat-fuse /usr/sbin/mount.exfat
-            sudo sed -i '/default_options_exfat/s/, nonempty//' /etc/udevil/udevil.conf
 
             sudo mkdir /media/$USER || true
             sudo chmod 750 /media/$USER || true

@@ -284,10 +284,7 @@ class Capture:
             if capture_interval_idx:
                 index, sub = capture_interval_idx
                 steps = len(self.camera_settings.intervals)
-                if stage is Stage.LIVE:
-                    interval_info = f"{steps} steps"
-                else:
-                    interval_info = f"{sub}|{index + 1}|{steps}"
+                interval_info = f"{sub}|{index + 1}|{steps}"
             metadata_ = metadata + [("MODE", capture_mode),
                                     ("STAGE", capture_stage),
                                     ("IMAGE_COUNT", image_count),
@@ -464,10 +461,11 @@ class SolverHints:
         self.dec_center = None
         self.pixscale = None # of the image that was platesolved
         self.parity = None
-        self.focal_length = None
+        self.focal_length = None # informational from last solve
+        self.fails = 0 # counts the number of fails in a row
+        self.merged = 0 # counts of merged stars
 
 # moved out for easier manual testing. Mutates the solver_hints
-# on a successful plate solve.
 def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, saved, solver_hints, polar_align, attempt_solve):
     raw_height, raw_width = img_raw.shape
     target_width, target_height = surface.get_size()
@@ -504,12 +502,12 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
         # print(f"factors = {scale_factor}, {scale_factor_v}")
         centroids = luddcam_astrometry.source_extract(img_mono)
         x = centroids["x"] / scale_factor_v
+        centroids["x"] = x
         y = centroids["y"] / scale_factor_v
-        flux = centroids["flux"]
+        centroids["y"] = y
         # scaled centroids relative to original (for focal length calc)
         scale_factor = raw_height / height
 
-        centroids = np.array(list(zip(x, y, flux)), dtype=[("x", float), ("y", float), ("flux", float)])
         solved, relevant_stars, relevant_dsos, polar_alignment_points, polar_alignment_targets = plate_solve(solver_hints, centroids, width, height, scale_factor, meta.get("XPIXSZ"), polar_align)
 
     focus_magic = None
@@ -521,9 +519,10 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
         start = time.perf_counter()
         centroids = luddcam_astrometry.source_extract(img_mono.astype(np.float32))
         end = time.perf_counter()
-        print(f"focus magic took {end - start}")
-        #focus_magic = np.median(centroids["a"])
-        focus_magic = np.average(centroids["a"], weights=centroids["flux"])
+        print(f"focus magic took {end - start} for {len(centroids)} centroids")
+        if len(centroids) > 5:
+            #focus_magic = np.median(centroids["a"])
+            focus_magic = np.average(centroids["a"], weights=centroids["flux"])
 
     img_rgb = quantize(img_rgb, long_exposure)
 
@@ -552,6 +551,8 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
         # where we are
         pygame.draw.circle(img_surface, WHITE, (width // 2, height // 2), size, 2)
         # where we need to go
+        # FIXME this algorithm needs a complete rethink. Maybe even write some dedicated
+        #       tests for it. Field tests were unsuccessful (no closer after 4 iterations).
         pygame.draw.line(img_surface, WHITE, (x2 - size, y2), (x2 + size, y2), thickness)
         pygame.draw.line(img_surface, WHITE, (x2, y2 - size), (x2, y2 + size), thickness)
 
@@ -580,7 +581,7 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
             surface.blit(top_left_text, top_left_rect)
         return
 
-    if (bitdepth := meta.get("BITDEPTH")) and not solved and stage is not Stage.LIVE:
+    if (bitdepth := meta.get("BITDEPTH")) and not solved and (stage is not Stage.LIVE or meta.get("SINGLE_EXPTIME") == meta.get("EXPTIME")):
         # the histogram and plate solving get in each others way we could add
         # the histogram back in for LIVE if we were to synthetically stretch the
         # pixels to the full exposure (or none needed) but that would mean
@@ -639,7 +640,7 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
 
     # bottom left should indicate what the shutter will do in LIVE
     bottom_left = ""
-    if stage == Stage.LIVE:
+    if stage is Stage.LIVE:
         bottom_left = tab(bottom_left) + "[LIVE"
         bottom_left = append_meta(bottom_left, "EXPTIME", suffix = "s")
         bottom_left += "]"
@@ -660,10 +661,11 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
         top_right = tab(top_right) + Path(out).name.split(".")[0]
 
     top_right = tab(top_right) + mode.name
-    if mode is Mode.INTERVALS:
-        top_right = append_meta(top_right, "INTERVAL_INFO", prefix=" ", align=False)
-    if mode != Mode.SINGLE:
-        top_right = append_meta(top_right, "IMAGE_COUNT", prefix=" ", suffix="/∞")
+    if stage is not Stage.LIVE:
+        if mode is Mode.INTERVALS:
+            top_right = append_meta(top_right, "INTERVAL_INFO", prefix=" ", align=False)
+        if mode != Mode.SINGLE:
+            top_right = append_meta(top_right, "IMAGE_COUNT", prefix=" ", suffix="/∞")
 
     text = font.render(top_right, True, WHITE)
     rect = text.get_rect()
@@ -862,13 +864,14 @@ class Menu:
 if __name__ == "__main__":
     pygame.font.init()
 
-    exp = 10.0
+    exp = 1
     # 3 minute dual band exposure
     # f = "test_data/osc/exposures/10.fit.fz"
     # actually a 30 second rgb exposure
     #f = "test_data/osc/exposures/1.fit.fz"
-    f = "tmp/guiding/Light_FOV_3.0s_Bin1_20250921-220306_0053.fit.fz"
+    #f = "tmp/guiding/Light_FOV_3.0s_Bin1_20250921-220306_0053.fit.fz"
 
+    f = "tmp/align/IMG_00014.fit"
 
     # sony a7iii is RGGB
 
@@ -897,10 +900,11 @@ if __name__ == "__main__":
         "BITDEPTH": 16,
         "IMAGE_COUNT": 1,
         "EXPTIME": exp,
+        "SINGLE_EXPTIME": 1,
         "GAIN": 180.0,
         "FILTER": "L",
         "BAYERPAT": bayer,
-        "STAGE": Stage.PAUSE,
+        "STAGE": Stage.LIVE,
         "MODE": Mode.SINGLE,
         "XPIXSZ": 5.94
     }

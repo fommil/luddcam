@@ -18,6 +18,7 @@ import time
 import fitsio
 import numpy as np
 import pygame
+import sep
 
 import pygame_menu
 
@@ -80,8 +81,17 @@ def format_dms(degrees):
 #
 # e.g. if a raw image is reduced 8x for display, scale_factor should be set to 8.
 def plate_solve(hints, centroids, width, height, scale_factor, pixel_size, polar_align):
+    FAIL = (False, None, None, None, None)
     if hints is None or len(centroids) < 10:
-        return False, None, None, None, None
+        return FAIL
+
+    # if the number of "merged" centroids has jumped dramatically since the last
+    # successful solve, then skip for a few frames since this is an indicator
+    # that the scope is being slewed.
+    merged = np.sum((centroids['flag'] & sep.OBJ_MERGED) != 0)
+    if hints.merged and hints.merged * 2 < merged and hints.fails < 10:
+        hints.fails += 1
+        return FAIL
 
     scale_hint = hints.pixscale
     if scale_hint is None:
@@ -95,7 +105,10 @@ def plate_solve(hints, centroids, width, height, scale_factor, pixel_size, polar
         if not bounds and hints.ra_center and hints.dec_center:
             # if it still failed, try without the position hint
             bounds = solver.solve_field(centroids, width, height, None, scale_hint, parity_hint)
-        if not bounds:
+        if not bounds and hints.pixscale and hints.fails > 10:
+            # only reset after 10 full failures in a row, which should be enough
+            # time for the mount to settle if it has been slewed.
+
             # if this still fails, throw away some of the more aggressive hints.
             # so we don't get into an infinite loop when the camera changes.
             hints.pixscale = None
@@ -105,7 +118,10 @@ def plate_solve(hints, centroids, width, height, scale_factor, pixel_size, polar
                 # one last go this time around
                 bounds = solver.solve_field(centroids, width, height, None, None, None)
         if not bounds:
-            return False, None, None, None, None
+            hints.fails += 1
+            return FAIL
+        hints.fails = 0
+        hints.merged = merged
         #print(bounds)
         ra_min = bounds["ramin"]
         ra_max = bounds["ramax"]
@@ -667,7 +683,7 @@ have_fpack = shutil.which("fpack") is not None
 
 # returns the image (right way up) and headers.
 # be sure to use `get_corrected_bayer` to decode the bayer.
-def load_fits(f):
+def load_fits(f, shift = 0):
     if f.endswith("z"):
         fits = fitsio.FITS(f)[1]
     else:
@@ -676,6 +692,10 @@ def load_fits(f):
     # bottom-up becomes top-down
     img = np.flipud(fits.read())
     h = fits.read_header()
+    if shift > 0:
+        # undoes asiair bullshit
+        img = img >> shift
+
     return img, h
 
 def get_corrected_bayer(h):

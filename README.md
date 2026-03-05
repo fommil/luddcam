@@ -84,7 +84,7 @@ Plate solving is only enabled in LIVE and SINGLE mode to conserve power. The fir
 <img src="./test_data/osc/assertions/live_plate_e.png" width="30%">
 </p>
 
-When plate solving is enabled, we can check and correct our polar alignment. Press `A` to lock in the current DEC, then slew only the RA axis until the drift is at its largest (usually between 45° and 90°). Then press `A` one more time to bring up a crosshair target on screen. Using only the alt/az screws on the mount's polar wedge, center the cross hair (as in this screenshot).
+When plate solving is enabled, we can check and correct our polar alignment (WARNING: this feature is very experimental). Press `A` to lock in the current DEC, then slew only the RA axis until the drift is at its largest (usually between 45° and 90°). Then press `A` one more time to bring up a crosshair target on screen. Using only the alt/az screws on the mount's polar wedge, center the cross hair (as in this screenshot).
 
 <p align="center">
 <img src="./test_data/osc/assertions/live_polar2.png" width="30%">
@@ -240,7 +240,7 @@ then turn it off and on again. You should see luddcam!
 
 - e-paper ✅
 - plate solving ✅
-- polar alignment ✅
+- polar alignment ✅ (needs work)
 - focus helper ✅
 - playback ✅
 

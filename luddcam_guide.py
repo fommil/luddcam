@@ -24,6 +24,7 @@
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
+import glob
 import os
 import re
 import random
@@ -36,6 +37,7 @@ import numpy as np
 import pygame
 
 import pygame_menu
+import sep
 
 import luddcam_astrometry
 import luddcam_settings
@@ -51,40 +53,6 @@ class Stage(Enum):
 
 # FIXME calibration
 
-# FIXME extract usefulness out of this brain dump...
-#
-# I already have subpixel sources. I ended up caving in and just using
-# this library (implementing the SExtractor logic) because it is zero
-# dependency and works very well although it could be a bit more efficient
-# by releasing the python global interpreter lock when calling out to
-# native code, so it blocks the whole app while it is running (thankfully
-# usually only a tenth of a second on a raspberry pi):
-#
-#   https://sep.readthedocs.io/en/stable/
-#
-# If you recall one of my first ideas was to fit PSFs and I was pleased to
-# see that it is indeed an option in sep. There's a few options to explore
-# there in terms of kernel shapes, although I'd need to figure out the
-# scale of the PSF for the current seeing conditions
-#
-# https://github.com/sep-developers/sep/blob/main/sep.pyx#L606
-#
-# That said, for plate solving it was totally fine to skip the convolution
-# step entirely (no kernel), and I presume this means it falls back to the
-# multi-scale neural network. There is the option to do a follow up to get
-# more accurate object centroids using a "windowed" algorithm, but it's
-# not clear to me at this stage if that is necessary, but for sure this
-# would allow taking a closer look at the guide stars.
-#
-# Then we have to understand how the night sky has moved between two
-# frames. How are you doing that in phd2? I've got a couple of ideas here,
-# the absolute simplest idea is to do a nearest neighbour search for each
-# source (within an expected flux and maximum distance), then take the
-# median distance moved relative the calibrated axes. I'm hoping that
-# should take general atmospheric wobble into account. Do you think that
-# will be good enough, is there anything more advanced I should be looking
-# at?
-#
 # Then there's a big trade off to make: should we do RA/DEC movements one
 # at a time or both at the same time? The advantage of one at a time is
 # that we can continue to keep our a priori knowledge about the movement
@@ -117,10 +85,6 @@ class Stage(Enum):
 # absolutely do this). Do you have any thoughts on what a "good" source
 # map looks like? SEP gives me access to lots of stats about the flux that
 # I could use here.
-
-
-# hot pixels (median filter?)
-# custom psf
 
 class Guide:
     def __init__(self, view, output_dir, guide):
@@ -299,51 +263,22 @@ class Menu:
 
         self.view.blit(screen)
 
-if __name__ == "__main__":
-    import sep
-
-    f = "tmp/guiding/Light_FOV_3.0s_Bin1_20250921-220306_0053.fit.fz"
-
-    img_raw, headers = load_fits(f)
-    img_raw = (img_raw >> 4) # undoes asiair bullshit
-    bayer = get_corrected_bayer(headers)
-
-    bit_depth = 12 #headers.get("BITDEPTH", img_raw.dtype.itemsize * 8)
-    print(f"bit depth = {bit_depth}, dtype = {img_raw.dtype}")
-
+def find_guide_stars(img_raw, bit_depth, min_dist):
     threshold = (1 << bit_depth) - 1  # high bit for given depth
-    print(f"using threshold {threshold}, min = {np.min(img_raw)}, max = {np.max(img_raw)}")
+    #print(f"using threshold {threshold}, min = {np.min(img_raw)}, max = {np.max(img_raw)}")
     # excludes hot pixels AND stars that risk saturation
     ys, xs = np.where(img_raw >= threshold * 0.9)
     hot_pixels = list(zip(xs.tolist(), ys.tolist()))
 
-    print(f"{len(hot_pixels)} hot pixels")
-
-    data = img_raw.astype(np.float32)
-    objs = luddcam_astrometry.source_extract(data, cull = None)
-
-    # for guide star selection we want to exclude anything that is impacted by
-    # saturation (including hot pixels), anything with outlier 'a/b' (galaxies
-    # and nebulae), or anything that is within 2*a of any other target (using
-    # the a of both targets). Then capped to a sensible amount.
-
-    guides = []
-    disqualified = []
-    for o in objs:
-        # FIXME remove anything near a hot pixel
-        x = float(o['x'])
-        y = float(o['y'])
-        a = float(o['a'])
+    def near_hot_pixel(x, y, a, scale=2.0, min_dist=10):
+        a = max(a * scale, min_dist)
         for hot_x, hot_y in hot_pixels:
             if x - a <= hot_x <= x + a and y - a <= hot_y <= y + a:
-                print(f"GOT A HOT ONE! {(x, y, a)} near {(hot_x, hot_y)} (flux is {o['flux']})")
-                break
+                return True
 
+    #print(f"{len(hot_pixels)} hot pixels")
 
-    # print(objs['b'] / objs['a'])
-
-    exit(0)
-    #print(np.median(objs['a']))
+    data = img_raw.astype(np.float32)
 
     # winpos is supposed to improve centroid estimation but the docs requiring a
     # ridiculous about of photometric analysis to estimate the sigma for each
@@ -361,23 +296,109 @@ if __name__ == "__main__":
     #
     # I am still suspicious that this is needed, it feels like with
     # enough guide stars it should all average out.
-    for factor in range(150):
-        sig = objs['a'] * factor / 100
-        start = time.perf_counter()
-        xwin, ywin, flag = sep.winpos(data, objs['x'], objs['y'], sig)
-        end = time.perf_counter()
-        #print(f"better centroids took {end - start}")
+    objs = luddcam_astrometry.source_extract(data, cull = 50, windowed_improvements = True)
+    # TODO cull size seems to have a big impact on stability of the diff
 
-        xdiff = objs['x'] - xwin
-        ydiff = objs['y'] - ywin
+    # for guide star selection we want to exclude anything that is impacted by
+    # saturation (including hot pixels), anything with outlier 'a/b' (galaxies
+    # and nebulae), or anything that is within 2*a of any other target (using
+    # the a of both targets). Then capped to a sensible amount.
 
-        print(f"sig = {factor / 100} median corrections = {np.median(np.abs(xdiff)):.2f}, {np.median(np.abs(ydiff)):.2f}")
-    #print(centroids)
+    guides = np.empty(0, dtype=objs.dtype)
+    def near_existing_guide(x, y, a, scale=2.0, min_dist=10.0):
+        gx = guides['x']
+        gy = guides['y']
+        a_scaled = max(scale * a, min_dist)
+        ga_scaled = np.maximum(scale * guides['a'], min_dist)
+        x_near = (np.abs(gx - x) <= a_scaled) | (np.abs(gx - x) <= ga_scaled)
+        y_near = (np.abs(gy - y) <= a_scaled) | (np.abs(gy - y) <= ga_scaled)
+        return np.any(x_near & y_near)
 
+    for o in objs:
+        x = float(o['x'])
+        y = float(o['y'])
+        a = float(o['a'])
 
-    #pygame.image.save(surface, "test.png")
+        if near_hot_pixel(x, y, a, scale=10):
+            continue
+        if near_existing_guide(x, y, a, scale=10, min_dist=min_dist):
+            continue
 
-    #subprocess.Popen(["feh", "--force-aliasing", "test.png"], start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        guides = np.append(guides, o)
+
+    return guides
+
+def find_guide_diff(guide1, guide2, search_box):
+    diffs = []
+    dd = search_box
+    for g1 in guide1:
+        x1 = float(g1['x'])
+        y1 = float(g1['y'])
+        a1 = float(g1['a'])
+        f1 = float(g1['flux'])
+        for g2 in guide2:
+            x2 = float(g2['x'])
+            y2 = float(g2['y'])
+            a2 = float(g2['a'])
+            f2 = float(g2['flux'])
+
+            if x1 - dd <= x2 <= x1 + dd and y1 - dd <= y2 <= y1 + dd:
+                if not 0.8 < a1/a2 < 1.2:
+                    # print(f"warning size changed from {a1} ({f1}) to {a2} ({f2})") # how
+                    break
+
+                diffs.append((x1 - x2, y1 - y2))
+                break
+
+    if not diffs:
+        return None
+
+    return tuple(float(x) for x in np.median(np.array(diffs), axis=0))
+
+if __name__ == "__main__":
+    bit_depth = 12 #headers.get("BITDEPTH", img_raw.dtype.itemsize * 8)
+    d = 50
+
+    all_diffs = []
+
+    ref_frame = None
+    i = 0
+    # FIXME test data is junk, we need to collect more. This
+    # was pointed at polaris. Doh!
+    for f in sorted(glob.glob("tmp/guiding/*.fit.fz")):
+        i = i + 1
+        # if i > 10:
+        #     break
+        img, _ = load_fits(f, 4)
+
+        frame = find_guide_stars(img, bit_depth, d)
+
+        if ref_frame is None:
+            ref_frame = frame
+        else:
+            diff = find_guide_diff(ref_frame, frame, 0.75 * d)
+            if diff is None:
+                # if this happens too many times in a row or gets too big, we
+                # should consider resetting the reference frame.
+                print("failed to find the diff")
+            else:
+                all_diffs.append(diff)
+                print(diff)
+
+    deltas = np.array(all_diffs)
+
+    # use a reference frame, not frame by frame deltas but that means we need to
+    # think about when to reset. But we need to think about when to reset the
+    # frame.
+
+    # instead of doing a cum sum we could also
+    # use a fixed reference frame
+    #pos = np.cumsum(deltas, axis=0)
+
+    rms_dx = np.sqrt(np.mean(deltas[:,0]**2))
+    rms_dy = np.sqrt(np.mean(deltas[:,1]**2))
+
+    print(f"RMS = {rms_dx}, {rms_dy}")
 
 # Local Variables:
 # compile-command: "python3 luddcam_guide.py"

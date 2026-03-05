@@ -28,11 +28,11 @@ hemisphere = "northern" #os.environ.get('HEMISPHERE', '').lower()
 # without having to plate solve.
 #
 # https://github.com/sep-developers/sep/issues/172
-def source_extract(data, cull = 30):
+def source_extract(data, cull = 30, windowed_improvements = False):
     start = time.perf_counter()
     bkg = sep.Background(data)
     end = time.perf_counter()
-    print(f"bkg computation took {end-start}")
+    #print(f"bkg computation took {end-start}")
     #print(bkg.globalback)
     #print(bkg.globalrms)
     data_sub = data - bkg
@@ -41,7 +41,7 @@ def source_extract(data, cull = 30):
     objects = sep.extract(data_sub, 5, err=bkg.globalrms, filter_kernel=None)
     # sorted by descending flux
     end = time.perf_counter()
-    print(f"extract took {end-start} for {len(objects)} objects")
+    #print(f"extract took {end-start} for {len(objects)} objects")
     # removes things that are definitely not stars
     objects = objects[objects['b'] / objects['a'] > 0.8]
     # sort by descending flux
@@ -51,11 +51,11 @@ def source_extract(data, cull = 30):
         objects = objects[:cull]
 
     # supposedly improves centroids but doesn't seem to matter for plate solving
-    #
-    # sig = objects['a'] * 0.5
-    # xwin, ywin, flag = sep.winpos(data, objects['x'], objects['y'], sig)
-    # objects['x'] = xwin
-    # objects['y'] = ywin
+    if windowed_improvements:
+        sig = objects['a'] * 0.5
+        xwin, ywin, flag = sep.winpos(data, objects['x'], objects['y'], sig)
+        objects['x'] = xwin
+        objects['y'] = ywin
 
     return objects
 
@@ -230,3 +230,18 @@ class Astrometry:
             {**obj, "x": x, "y": y}
             for obj, (x, y) in zip(data, with_pixels.tolist())
         ]
+
+if __name__ == "__main__":
+    import glob
+    from luddcam_images import *
+    for f in sorted(glob.glob("tmp/trailing/*.fit")):
+        img, _ = load_fits(f)
+        data = img.astype(np.float32)
+        centroids = source_extract(data)
+        flags = np.sum((centroids["flag"] & sep.OBJ_MERGED) != 0)
+        print(f"{f} had {flags}")
+
+# Local Variables:
+# compile-command: "python3 luddcam_astrometry.py"
+# End:
+
