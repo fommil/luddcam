@@ -151,14 +151,7 @@ I'm able to get a little over 3 hours (on an rpi 4b and imx715 planetary camera 
 
 ## DSI
 
-If you installed the screen by plugging in an incredibly fiddly cable, enable DSI with:
-
-Add the following entry in `/boot/firmware/config.txt` is all that is needed:
-
-```
-[all]
-dtoverlay=vc4-kms-dsi-waveshare-panel,4_3_inch
-```
+If you installed the screen by plugging in an incredibly fiddly cable, it should work on a fresh OS install.
 
 Unfortunately the backlight cannot be turned off entirely, but we try to dim it as much as possible. I'm able to get about 3 hours (on an rpi 4b and imx715 planetary camera taking 10 second exposures) with a 5amp / 120g usb power bank, and almost 12 hours with a larger 20amp / 250g bank, drawing 1.0A with the screensaver on (i.e. dimmed). It draws 1.1A if the screen is left on.
 
