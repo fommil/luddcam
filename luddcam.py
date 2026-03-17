@@ -1,14 +1,10 @@
 #!/usr/bin/env python3
 
 from enum import IntEnum
-import os
 import pathlib
-import subprocess
-import sys
 import threading
 import time
 import traceback
-import warnings
 
 import pygame
 import pygame_menu
@@ -20,7 +16,7 @@ import luddcam_capture
 import luddcam_guide
 import luddcam_playback
 
-from luddcam_settings import is_left, is_right, is_up, is_down, is_menu, is_start, is_action, is_back, is_button
+from luddcam_settings import is_down, is_menu
 
 ALIGN_LEFT=pygame_menu.locals.ALIGN_LEFT
 ALIGN_RIGHT=pygame_menu.locals.ALIGN_RIGHT
@@ -117,6 +113,7 @@ def main():
 
     while True:
         events = pygame.event.get()
+        # FIXME on the epaper rpi I often see the joystick getting stuck with DOWN
         for event in events:
             # print(f"DEBUG: received event {event}")
             if event.type in [pygame.JOYDEVICEADDED, pygame.JOYDEVICEREMOVED]:

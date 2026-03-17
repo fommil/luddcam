@@ -507,7 +507,12 @@ class Camera:
 
         img_array = np.ctypeslib.as_array(buf)
         if self.target_fmt == ASI_IMG_TYPE.ASI_IMG_RAW16:
-            return img_array.view(np.uint16).reshape(height, width)
+            resp = img_array.view(np.uint16).reshape(height, width)
+            if (shift := 16 - self.bitdepth) > 0:
+                # libasi fills from the left, fix it so the zeros are
+                # high bits not low bits.
+                resp = resp >> shift
+            return resp
         elif self.target_fmt == ASI_IMG_TYPE.ASI_IMG_RAW8:
             return img_array.view(np.uint8).reshape(height, width)
 

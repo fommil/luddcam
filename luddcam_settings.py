@@ -1,11 +1,8 @@
 from fractions import Fraction
 import json
 import os
-import pathlib
 import subprocess
 import sys
-import traceback
-import warnings
 
 # TODO remove Box, it is more trouble than its worth
 #      and an awkward extra dependency.
@@ -53,7 +50,7 @@ FILTER_OPTIONS = ["undefined",
 # Fraction(...).limit_denominator(10000)
 EXPOSURE_OPTIONS = sorted(set(
     # typical DSLR shutter
-    [1/8000, 1/4000, 1/2000, 1/1000, 1/500, 1/250, 1/125, 1/60, 1/30, 1/15, 1/12, 1/10, 1/8, 1/4, 1/2, 1, 2, 4, 5, 8, 10, 15, 30] +
+    [1/8000, 1/4000, 1/2000, 1/1000, 1/500, 1/250, 1/125, 1/60, 1/30, 1/15, 1/12, 1/10, 1/8, 1/4, 1/2, 1, 2, 3, 4, 5, 10, 15, 30] +
     # sensible DSO values
     [60, 120, 180, 240, 300, 600, 900, 1200]))
 

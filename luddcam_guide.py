@@ -21,28 +21,21 @@
 # Everything is intended to be automatic, so the algorithm may choose to change
 # the exposure time if it feels it would benefit from it.
 
-from datetime import datetime, timezone
 from enum import Enum
-from pathlib import Path
 import glob
-import os
-import re
 import random
 import string
 import threading
 import time
 
-import fitsio
 import numpy as np
 import pygame
 
-import pygame_menu
-import sep
 
 import luddcam_astrometry
 import luddcam_settings
 from luddcam_images import *
-from luddcam_settings import is_left, is_right, is_up, is_down, is_menu, is_start, is_action, is_back, is_button
+from luddcam_settings import is_left, is_start, is_action, is_back
 import mocks
 
 class Stage(Enum):
@@ -51,7 +44,7 @@ class Stage(Enum):
     PAUSE = 2
     STOP = 3
 
-# FIXME calibration
+# TODO calibration
 
 # Then there's a big trade off to make: should we do RA/DEC movements one
 # at a time or both at the same time? The advantage of one at a time is
@@ -363,8 +356,7 @@ if __name__ == "__main__":
 
     ref_frame = None
     i = 0
-    # FIXME test data is junk, we need to collect more. This
-    # was pointed at polaris. Doh!
+    # FIXME use the newer test data
     for f in sorted(glob.glob("tmp/guiding/*.fit.fz")):
         i = i + 1
         # if i > 10:

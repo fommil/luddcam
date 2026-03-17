@@ -1,7 +1,6 @@
 # touptek implementation of the Camera duck api
 
 import atexit
-import ctypes
 import math
 import numpy as np
 import time

@@ -2,7 +2,6 @@ import glob
 import os
 import numpy as np
 import pygame
-import pygame_menu.menu
 import shutil
 import sys
 import subprocess
@@ -10,7 +9,6 @@ import traceback
 import threading
 import time
 
-from PIL import Image
 
 import mocks
 import luddcam

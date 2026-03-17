@@ -32,18 +32,11 @@
 # user can do this manually when they notice that a single screw is doing the
 # heavy lifting).
 
-from datetime import datetime, timezone
 from enum import Enum
-from fractions import Fraction
 from pathlib import Path
-import math
-import os
 import re
-import shutil
 import subprocess
-import sys
 import threading
-import traceback
 import time
 
 import numpy as np
@@ -53,10 +46,11 @@ import pygame_menu
 
 import luddcam_astrometry
 import luddcam_settings
-from luddcam_settings import is_back, is_left, is_right, is_up, is_down, is_start, is_action, is_button
+from luddcam_settings import is_back, is_left, is_right, is_up, is_start, is_action, is_button
 import mocks
 
 from luddcam_images import *
+from luddcam_solve import *
 
 ALIGN_LEFT=pygame_menu.locals.ALIGN_LEFT
 
@@ -338,7 +332,7 @@ class View:
         self.saved = False
 
         self.plate_solve = False
-        self.align = None # ra, dec for the base then ra, dec for the test
+        self.align = None # None = Not aligning | False = data gather | True = plot target
         self.hints = None
 
         self.font_large = pygame.font.Font(luddcam_settings.hack, 32)
@@ -354,22 +348,16 @@ class View:
 
     def toggle_align(self):
         with self.lock:
-            hint_ra = self.hints.ra_center
-            hint_dec = self.hints.dec_center
-            if hint_ra is None or hint_dec is None:
-                # fail, reset
-                self.align = None
-                return
-            pos = (hint_ra, hint_dec)
             match self.align:
                 case None:
-                    # start
-                    self.align = (pos, None)
-                case (start, None) :
-                    # prompt to realign
-                    self.align = (start, pos)
-                case _:
-                    # done
+                    self.align = False
+                    self.hints.align_samples = []
+                    self.hints.align_targets = None
+                    self.hints.align_error = None
+                case False:
+                    if 2 <= len(self.hints.align_samples):
+                        self.align = True
+                case True:
                     self.align = None
 
     def get_plate(self):
@@ -455,16 +443,6 @@ class View:
             self.saved = out
             self.stale = True
 
-class SolverHints:
-    def __init__(self):
-        self.ra_center = None
-        self.dec_center = None
-        self.pixscale = None # of the image that was platesolved
-        self.parity = None
-        self.focal_length = None # informational from last solve
-        self.fails = 0 # counts the number of fails in a row
-        self.merged = 0 # counts of merged stars
-
 # moved out for easier manual testing. Mutates the solver_hints
 def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, saved, solver_hints, polar_align, attempt_solve):
     raw_height, raw_width = img_raw.shape
@@ -474,7 +452,7 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
     stage = meta["STAGE"]
 
     solve = attempt_solve and solver_hints is not None and not zoom and ((mode == Mode.SINGLE and saved) or stage == Stage.LIVE)
-    polar_align = polar_align if solve and stage == Stage.LIVE else False
+    polar_align = polar_align if solve and stage == Stage.LIVE else None
 
     start = time.perf_counter()
     bayer = meta.get("BAYERPAT")
@@ -491,12 +469,16 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
     # conversion and reuse the last solution to save some cycles, or look
     # into having a hot server wrapper over solve-field if it's a problem.
     centroids = []
-    solved, relevant_stars, relevant_dsos, polar_alignment_points, polar_alignment_targets = False, None, None, None, None
+    solution = None
     if solve:
         # we throw away data in pairs of two, which effectively means picking
         # the first colour in the bayer for OSC. We also take the opportunity to
         # downscale big (full frame) images that are overkill.
-        img_mono = pixel_sample(img_raw, min(raw_width // 2, 2000), min(raw_height // 2, 2000)).astype(np.float32)
+
+        if bayer is None and raw_width <= 2048:
+            img_mono = img_raw.astype(np.float32)
+        else:
+            img_mono = pixel_sample(img_raw, min(raw_width // 2, 2000), min(raw_height // 2, 2000)).astype(np.float32)
         # relative to displayed image, for solving
         scale_factor_v = img_mono.shape[0] / height
         # print(f"factors = {scale_factor}, {scale_factor_v}")
@@ -507,8 +489,8 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
         centroids["y"] = y
         # scaled centroids relative to original (for focal length calc)
         scale_factor = raw_height / height
-
-        solved, relevant_stars, relevant_dsos, polar_alignment_points, polar_alignment_targets = plate_solve(solver_hints, centroids, width, height, scale_factor, meta.get("XPIXSZ"), polar_align)
+        #print(f"trying to solve with {len(centroids)}")
+        solution = plate_solve(solver_hints, centroids, width, height, scale_factor, meta.get("XPIXSZ"), polar_align)
 
     focus_magic = None
     if zoom and stage == Stage.LIVE and img_mono is not None:
@@ -531,35 +513,34 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
     # prefer this for the image and any plate solving markup
     img_surface = pygame.surfarray.make_surface(img_rgb)
 
-    if polar_alignment_points:
-        pygame.draw.lines(img_surface, WHITE, closed=False, points=polar_alignment_points, width=1)
+    if solution:
+        if solution.polar_alignment_points:
+            pygame.draw.lines(img_surface, WHITE, closed=False, points=solution.polar_alignment_points, width=1)
 
-    if relevant_stars:
-        draw_stars(img_surface, relevant_stars, font)
+        if solution.relevant_stars:
+            draw_stars(img_surface, solution.relevant_stars, font)
 
-    if polar_alignment_targets:
-        (x1, y1), (x2, y2) = polar_alignment_targets
-        # pin to the visible area
-        x1 = min(max(1, x1), width - 1)
-        y1 = min(max(1, y1), height - 1)
-        x2 = min(max(1, x2), width - 1)
-        y2 = min(max(1, y2), height - 1)
-        size = 10
-        thickness = 3
-        # where we probed (debugging really)
-        pygame.draw.rect(img_surface, WHITE, (x1 - 2, y1 - 2, 4, 4), 0)
-        # where we are
-        pygame.draw.circle(img_surface, WHITE, (width // 2, height // 2), size, 2)
-        # where we need to go
-        # FIXME this algorithm needs a complete rethink. Maybe even write some dedicated
-        #       tests for it. Field tests were unsuccessful (no closer after 4 iterations).
-        pygame.draw.line(img_surface, WHITE, (x2 - size, y2), (x2 + size, y2), thickness)
-        pygame.draw.line(img_surface, WHITE, (x2, y2 - size), (x2, y2 + size), thickness)
+        if solution.polar_alignment_targets:
+            (x1, y1), (x2, y2) = solution.polar_alignment_targets
+            # pin to the visible area
+            x1 = min(max(1, x1), width - 1)
+            y1 = min(max(1, y1), height - 1)
+            x2 = min(max(1, x2), width - 1)
+            y2 = min(max(1, y2), height - 1)
+            size = 10
+            thickness = 3
+            # where we probed (debugging really)
+            pygame.draw.rect(img_surface, WHITE, (x1 - 2, y1 - 2, 4, 4), 0)
+            # where we are
+            pygame.draw.circle(img_surface, WHITE, (width // 2, height // 2), size, 2)
+            # where we need to go
+            pygame.draw.line(img_surface, WHITE, (x2 - size, y2), (x2 + size, y2), thickness)
+            pygame.draw.line(img_surface, WHITE, (x2, y2 - size), (x2, y2 + size), thickness)
 
-    # we could include the x/y offset here and allow the out-of-frame DSOs to be
-    # plotted outside the image, but that's a bit of a corner case. boom boom.
-    if relevant_dsos:
-        draw_dsos(img_surface, relevant_dsos, solver_hints.pixscale, font)
+        # we could include the x/y offset here and allow the out-of-frame DSOs to be
+        # plotted outside the image, but that's a bit of a corner case. boom boom.
+        if solution.relevant_dsos:
+            draw_dsos(img_surface, solution.relevant_dsos, solver_hints.pixscale, font)
 
     def append_meta(s, key, prefix = "", suffix = "", align = True):
         return tab_append_lookup(meta, s, key, prefix, suffix, align)
@@ -581,7 +562,7 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
             surface.blit(top_left_text, top_left_rect)
         return
 
-    if (bitdepth := meta.get("BITDEPTH")) and not solved and (stage is not Stage.LIVE or meta.get("SINGLE_EXPTIME") == meta.get("EXPTIME")):
+    if (bitdepth := meta.get("BITDEPTH")) and not solution and (stage is not Stage.LIVE or meta.get("SINGLE_EXPTIME") == meta.get("EXPTIME")):
         # the histogram and plate solving get in each others way we could add
         # the histogram back in for LIVE if we were to synthetically stretch the
         # pixels to the full exposure (or none needed) but that would mean
@@ -610,28 +591,36 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
     top_left2 = ""
     if solve:
         match polar_align:
-            case _ if not solved:
+            case _ if not solution:
                 top_left2 = "FAIL plate solve"
             case None:
                 pass
-            case ((ra, dec), None):
-                # Having PEC would be nice but it's actually really hard to
-                # estimate it without knowing the alt/az axis point. The best
-                # we can do is just show the delta and the user can manually
-                # choose a point that maximises it.
-                delta_ra = (solver_hints.ra_center - ra) % 360
-                if delta_ra > 180:
-                    delta_ra = delta_ra - 360
-                    delta_ra = abs(delta_ra)
-                delta_dec = abs(solver_hints.dec_center - dec) / 2
+            case False:
                 advice = ""
-                if delta_ra < 10:
-                    advice = " (too close)"
-                if delta_ra > 95:
-                    advice = " (too far)"
-                top_left2 = f"Slew RA {format_dms(round(delta_ra))}{advice} → maximise drift {format_dms(delta_dec)} → press A"
-            case ((ra1, dec1), (ra2, dec2)):
-                top_left2 = f"polar align to crosshairs → press A"
+                ps = solver_hints.align_samples
+                if 2 <= len(ps):
+                    lo, hi = min(p[0] for p in ps), max(p[0] for p in ps)
+                    delta_ra = round(abs(ra_diff(lo, hi)))
+                    quality = ""
+                    proceed = True
+                    if 3 < len(ps) or delta_ra < 45:
+                        quality = "not good"
+                        proceed = False
+                    elif delta_ra < 90:
+                        quality = "OK"
+                    else:
+                        quality = "good"
+                    advice = f" ({format_dms(delta_ra)} from {len(ps)} samples is {quality})"
+                    if proceed:
+                        advice += " → press A"
+
+                top_left2 = f"Slew RA to collect data{advice}"
+            case True:
+                # this is the error calculated at the pole, not the movement the
+                # user needs to make. Doing pythagoras on this is heresy but
+                # it's approximately accurate since it is small.
+                err = math.hypot(*solver_hints.align_error)
+                top_left2 = f"[{format_dms(err)}] polar align to crosshairs → press A"
 
     top_left2_text = font.render(top_left2, True, WHITE)
     top_left2_rect = top_left2_text.get_rect()
@@ -868,17 +857,20 @@ if __name__ == "__main__":
     # 3 minute dual band exposure
     # f = "test_data/osc/exposures/10.fit.fz"
     # actually a 30 second rgb exposure
-    #f = "test_data/osc/exposures/1.fit.fz"
+    f = "test_data/osc/exposures/1.fit.fz"
     #f = "tmp/guiding/Light_FOV_3.0s_Bin1_20250921-220306_0053.fit.fz"
 
-    f = "tmp/align/IMG_00014.fit"
+    f = "tmp/align/IMG_00004.fit.fz"
+
+    #f = "tmp/align/IMG_00014.fit"
 
     # sony a7iii is RGGB
 
     img_raw, h = load_fits(f)
+    #print(f"max = {np.max(img_raw)}")
 
     bayer = get_corrected_bayer(h)
-    # print(f"BAYER={bayer}")
+    #print(f"BAYER={bayer}")
 
     # bayer = "RGGB"
     #bayer = None
@@ -897,7 +889,7 @@ if __name__ == "__main__":
 
     zoom = False
     meta = {
-        "BITDEPTH": 16,
+        "BITDEPTH": h.get("BITDEPTH", 16),
         "IMAGE_COUNT": 1,
         "EXPTIME": exp,
         "SINGLE_EXPTIME": 1,
@@ -906,23 +898,37 @@ if __name__ == "__main__":
         "BAYERPAT": bayer,
         "STAGE": Stage.LIVE,
         "MODE": Mode.SINGLE,
-        "XPIXSZ": 5.94
+        "XPIXSZ": h.get("XPIXSZ", 5.94)
     }
     out = "/foo/bar/IMG_00001.fits"
     font = pygame.font.Font(luddcam_settings.hack, 14)
 
+    # for the andromeda example
     hints = SolverHints()
-    # hints.ra_center = 10.70998331
-    # hints.dec_center = 41.256808731
-    # hints.pixscale = 16.477246715
-    # hints.focal_length = 595
+    hints.ra_center = 10.70998331
+    hints.dec_center = 41.256808731
+    hints.pixscale = 16.477246715
+    hints.focal_length = 595
+    hints.align_samples = [(0, 41.3), (10.7, 41.4), (30.7, 41.6)]
+    hints.align_targets = ((0, 41.3), (10.7, 41.4))
+    hints.align_error = (0.01, 0.01)
 
-    align = None
-    #align = ((0, 41.5), None)
-    #align = ((0, 41.5), (10.7, 50))
+    # for the alignment example
+    hints = SolverHints()
+    hints.ra_center = h.get("RA")
+    hints.dec_center = h.get("DEC")
+    hints.focal_length = h.get("FOCALLEN")
+    hints.align_samples = [(146.863510433, 24.4932219664),
+                           (91.9389180732, 24.6341121843),
+                           (55.3696507467, 24.3101586984)]
+    hints.align_targets = ((156.600466429, 24.4012276267),
+                           (156.8726162416188, 24.932472683662183))
+    hints.align_error = (0.25256720302354435, 0.7575697858059458)
+
+    align = True
 
     start = time.perf_counter()
-    render_frame_for_screen(surface, img_raw, zoom, meta, out, font, False, False, hints, align, False)
+    render_frame_for_screen(surface, img_raw, zoom, meta, out, font, False, False, hints, align, True)
     end = time.perf_counter()
     print(f"rendering took {end - start:.2f}")
 

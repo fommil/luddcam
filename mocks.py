@@ -2,13 +2,10 @@
 # scripts that use the app and then assert on screenshots of the app and the
 # existence of output files.
 
-import fitsio
 import glob
 import pathlib
-import numpy as np
 import os
 import time
-import threading
 import PIL
 
 import luddcam_images

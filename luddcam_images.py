@@ -1,16 +1,10 @@
 # helper methods for dealing with images
 
 from datetime import datetime, timezone
-from enum import Enum
 from fractions import Fraction
-from pathlib import Path
-import math
 import os
-import pathlib
-import re
 import shutil
 import subprocess
-import sys
 import threading
 import traceback
 import time
@@ -18,12 +12,8 @@ import time
 import fitsio
 import numpy as np
 import pygame
-import sep
 
-import pygame_menu
 
-import luddcam_astrometry
-import luddcam_catalog
 
 # TODO compression is actually quite slow, so maybe make this a setting at some
 # point if it can be justified. Compression is usually a little less than 50% so
@@ -76,90 +66,6 @@ def format_dms(degrees):
     if s > 0:
         res += f"{s}\""
     return res
-
-# this takes the centroids of an image that is potentially scaled down for display
-#
-# e.g. if a raw image is reduced 8x for display, scale_factor should be set to 8.
-def plate_solve(hints, centroids, width, height, scale_factor, pixel_size, polar_align):
-    FAIL = (False, None, None, None, None)
-    if hints is None or len(centroids) < 10:
-        return FAIL
-
-    # if the number of "merged" centroids has jumped dramatically since the last
-    # successful solve, then skip for a few frames since this is an indicator
-    # that the scope is being slewed.
-    merged = np.sum((centroids['flag'] & sep.OBJ_MERGED) != 0)
-    if hints.merged and hints.merged * 2 < merged and hints.fails < 10:
-        hints.fails += 1
-        return FAIL
-
-    scale_hint = hints.pixscale
-    if scale_hint is None:
-        scale_hint = (scale_factor * 0.5, None)
-    pos_hint = (hints.ra_center, hints.dec_center)
-    parity_hint = hints.parity
-
-    relevant_stars, relevant_dsos, polar_alignment_points, polar_alignment_targets = None, None, None, None
-    with luddcam_astrometry.Astrometry() as solver:
-        bounds = solver.solve_field(centroids, width, height, pos_hint, scale_hint, parity_hint)
-        if not bounds and hints.ra_center and hints.dec_center:
-            # if it still failed, try without the position hint
-            bounds = solver.solve_field(centroids, width, height, None, scale_hint, parity_hint)
-        if not bounds and hints.pixscale and hints.fails > 10:
-            # only reset after 10 full failures in a row, which should be enough
-            # time for the mount to settle if it has been slewed.
-
-            # if this still fails, throw away some of the more aggressive hints.
-            # so we don't get into an infinite loop when the camera changes.
-            hints.pixscale = None
-            hints.parity = None
-            hints.focal_length = None # informational only
-            if scale_hint or parity_hint:
-                # one last go this time around
-                bounds = solver.solve_field(centroids, width, height, None, None, None)
-        if not bounds:
-            hints.fails += 1
-            return FAIL
-        hints.fails = 0
-        hints.merged = merged
-        #print(bounds)
-        ra_min = bounds["ramin"]
-        ra_max = bounds["ramax"]
-        hints.ra_center = bounds["ra_center"]
-        dec_min = bounds["decmin"]
-        dec_max = bounds["decmax"]
-        hints.dec_center = bounds["dec_center"]
-        hints.pixscale = bounds["pixscale"]
-        hints.parity = bounds["parity"]
-
-        if pixel_size:
-            hints.focal_length = round((scale_factor * pixel_size / hints.pixscale) * 206.265)
-            # print(f"focal_length = {focal_length}")
-
-        print(f"plate solved at {hints.ra_center},{hints.dec_center} scale {hints.pixscale} with {hints.focal_length}mm")
-
-        match polar_align:
-            case None:
-                stars = luddcam_catalog.relevant_stars(dec_min, dec_max, ra_min, ra_max)
-                dsos = luddcam_catalog.relevant_dsos(dec_min, dec_max, ra_min, ra_max)
-                relevant_stars = solver.with_radec_to_pixels(stars)
-                relevant_dsos = solver.with_radec_to_pixels(dsos)
-            case ((ra1, dec1), target):
-                ras = [(ra, dec1) for ra in np.linspace(ra_min, ra_max, 100)]
-                polar_alignment_points = [tuple(a) for a in solver.radec_to_pixels(ras)]
-                match target:
-                    case None:
-                        pass
-                    case (ra2, dec2):
-                        targets = [
-                            # where we probed
-                            (ra2, dec2),
-                            # where to go
-                            (ra2, (dec1 + dec2) / 2)
-                        ]
-                        polar_alignment_targets = [tuple(a) for a in solver.radec_to_pixels(targets)]
-
-    return True, relevant_stars, relevant_dsos, polar_alignment_points, polar_alignment_targets
 
 def draw_stars(surface, stars, font):
     for star in stars:
@@ -495,6 +401,9 @@ asinh_lut_16 = lut_asinh_16(15)
 # returns a tuple of normalised histogram weights and the absolute count of
 # saturated pixels. Log scale.
 def histogram(img_raw, bins, bitdepth):
+    # note that some 12 bit cameras still give 16 bits of data.
+    # the correct fix is to address it at the sdk level. We
+    # could workaround it here but that's ambiguous.
     max_val = 1 << bitdepth
     data = img_raw.ravel()
     data = data.clip(0, max_val - 1) # safety

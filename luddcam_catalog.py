@@ -38,10 +38,10 @@ def dedupe_by_position(objects, tol_arcsec):
     for obj in objects:
         is_dupe = False
         for existing in keep:
-            dec_diff = abs(obj["dec"] - existing["dec"])
-            ra_diff = abs(obj["ra"] - existing["ra"])
+            dec_d = abs(obj["dec"] - existing["dec"])
+            ra_d = abs(ra_diff(obj["ra"], existing["ra"]))
 
-            if ra_diff < tol and dec_diff < tol:
+            if ra_d < tol and dec_d < tol:
                 is_dupe = True
                 break
 
@@ -49,6 +49,16 @@ def dedupe_by_position(objects, tol_arcsec):
             keep.append(obj)
 
     return keep
+
+def ra_diff(ra2, ra1):
+    d = (ra2 - ra1) % 360
+    if d > 180:
+        d -= 360
+    return d
+
+def ra_mid(ra1, ra2):
+    d = ra_diff(ra2, ra1)
+    return (ra1 + d / 2) % 360
 
 stars = parse_siril_catalog("stars.csv")
 # named stars only

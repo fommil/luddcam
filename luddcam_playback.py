@@ -4,7 +4,7 @@ from pathlib import Path
 import pygame
 import pygame_menu
 
-from luddcam_settings import is_back, is_left, is_right, is_up, is_down, is_start, is_action, is_button
+from luddcam_settings import is_left, is_right, is_action
 import luddcam_settings
 
 from luddcam_images import *
