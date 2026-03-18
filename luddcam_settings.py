@@ -693,6 +693,8 @@ class Menu:
             options = list(range(start, end + 1, step))
             if self.camera.gain_unity:
                 options.append(self.camera.gain_unity)
+            if self.camera.gain_hc:
+                options.append(self.camera.gain_hc)
             options.append(self.camera.gain_default)
             options.append(self.camera.gain_min)
             options.append(self.camera.gain_max)

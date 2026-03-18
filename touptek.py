@@ -93,6 +93,7 @@ class Camera:
         )
         # TODO table of unity gains
         self.gain_unity = None
+        self.gain_hc = None
 
         # there isn't any way to calculate a sensible blacklevel for a given gain
         # so we just leave it at whatever default it had, exposing the value.

@@ -299,7 +299,7 @@ BAYER_PATTERN_BOTTOMUP = {
 # is_cooled - boolean
 # has_gain - boolean
 # gain - number
-# gain_{min,max,default,unity} - number(s)
+# gain_{min,max,default,unity,hc} - number(s)
 # offset - number
 # exposure_{min,max} - number(s)
 # bayer - string pattern
@@ -379,17 +379,21 @@ class Camera:
             self.gain_max = caps.MaxValue
             self.gain_default = caps.DefaultValue
             self.gain_unity = get_unity_gain(self.name)
+            self.gain_hc = get_high_conversion_gain(self.name)
 
             # seems unlikely that we would have gain without offset, but play it safe
             if ASI_CONTROL_TYPE.ASI_OFFSET in self.controls:
                 pOffset_HighestDR, pOffset_UnityGain, pGain_LowestRN, pOffset_LowestRN = c_int(), c_int(), c_int(), c_int()
                 call(self.lib.ASIGetGainOffset(self.i, byref(pOffset_HighestDR), byref(pOffset_UnityGain), byref(pGain_LowestRN), byref(pOffset_LowestRN)))
-                #print(f"ASIGetGainOffset({self.i}, {pOffset_HighestDR.value}, {pOffset_UnityGain.value}, {pGain_LowestRN.value}, {pOffset_LowestRN.value})")
+                print(f"ASIGetGainOffset({self.name}, {pOffset_HighestDR.value}, {pOffset_UnityGain.value}, {pGain_LowestRN.value}, {pOffset_LowestRN.value})")
 
                 pLGain, pMGain, pHGain, pHOffset = c_int(), c_int(), c_int(), c_int()
                 call(self.lib.ASIGetLMHGainOffset(self.i, byref(pLGain), byref(pMGain), byref(pHGain), byref(pHOffset)))
-                #print(f"ASIGetLMHGainOffset({self.i}, {pLGain.value}, {pMGain.value}, {pHGain.value}, {pHOffset.value})")
+                print(f"ASIGetLMHGainOffset({self.name}, {pLGain.value}, {pMGain.value}, {pHGain.value}, {pHOffset.value})")
                 # could potentially set gain_{min,max} based on pLGain, pHGain
+
+                # the asi220mm says that the pMGain is 68 which is the unity
+                # gain. It's unclear if that can be trusted in the general case.
 
                 self.gain_hdr = pLGain.value # bit of an assumption...
                 self.offset_hdr = pOffset_HighestDR.value
@@ -508,7 +512,7 @@ class Camera:
         img_array = np.ctypeslib.as_array(buf)
         if self.target_fmt == ASI_IMG_TYPE.ASI_IMG_RAW16:
             resp = img_array.view(np.uint16).reshape(height, width)
-            if (shift := 16 - self.bitdepth) > 0:
+            if self.bitdepth and (shift := 16 - self.bitdepth) > 0:
                 # libasi fills from the left, fix it so the zeros are
                 # high bits not low bits.
                 resp = resp >> shift
@@ -710,10 +714,22 @@ def get_normalized_arch():
 # so we have to figure them out from published data. Added on demand.
 def get_unity_gain(camera_name):
     model_map = {
-        "ASI120M": 30, # 12 bit mode
-        "ASI220M": 68,
-        "ASI1600M": 139,
-        "ASI585M": 195
+        "ASI120M" : 29,  # https://www.zwoastro.com/product/mini-cameras/
+        "ASI220M" : 68,  # https://www.zwoastro.com/product/zwo-asi220mm-minimono/
+        "ASI1600M": 139, # https://i.zwoastro.com/zwo-website/manuals/ASI1600_Manual_EN_V1.5.pdf
+        "ASI585M" : 195  # https://www.zwoastro.com/product/asi585mc-mm/
+    }
+    for model, gain in model_map.items():
+        if model in camera_name:
+            return gain
+    return None
+
+# some cameras have a documented HCG that people like to use, add it to
+# the list of usable gains.
+def get_high_conversion_gain(camera_name):
+    model_map = {
+        "ASI220M": 106, # https://www.zwoastro.com/product/zwo-asi220mm-minimono/
+        "ASI585M": 200  # https://www.zwoastro.com/product/asi585mc-mm/
     }
     for model, gain in model_map.items():
         if model in camera_name:
@@ -732,15 +748,16 @@ class ZwoError(Exception):
 if __name__ == '__main__':
     efw = EfwFilter()
     efw.wheels()
-    exit(0)
 
     api = AsiCamera2()
     cameras = api.cameras()
     assert len(cameras) > 0
     camera = cameras[0]
 
-    camera.set_cooling(0)
-    camera.set_gain(camera.gain_unity)
+    if camera.is_cooled:
+        camera.set_cooling(0)
+    if camera.has_gain:
+        camera.set_gain(camera.gain_unity)
     # time.sleep(10)
 
     camera.capture_start(1)
