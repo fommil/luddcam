@@ -2688,18 +2688,22 @@ class Menu(Base):
                     elif self._ctrl.joy_axis_x_right(event, self) and self._current._used_columns > 1:
                         self._current._joy_event |= JOY_EVENT_RIGHT
 
+                    # NOTE: lines commented out to workaround https://github.com/ppizarror/pygame-menu/issues/527
                     if self._current._joy_event:
                         sel = self._current._handle_joy_event(True)
                         if self._current._joy_event == prev:
-                            pygame.time.set_timer(self._current._joy_event_repeat, self._ctrl.joy_repeat)
+                            pass
+                            #pygame.time.set_timer(self._current._joy_event_repeat, self._ctrl.joy_repeat)
                         else:
-                            pygame.time.set_timer(self._current._joy_event_repeat, self._ctrl.joy_delay)
+                            pass
+                            #pygame.time.set_timer(self._current._joy_event_repeat, self._ctrl.joy_delay)
                         if sel:
                             self._current._last_update_mode.append(_events.MENU_LAST_JOY_REPEAT)
                             updated = True
                             break
                     else:
-                        pygame.time.set_timer(self._current._joy_event_repeat, 0)
+                        pass
+                        #pygame.time.set_timer(self._current._joy_event_repeat, 0)
 
                 # User repeats previous joy event input
                 elif event.type == self._current._joy_event_repeat:
