@@ -82,7 +82,10 @@ class Astrometry:
     # transformation methods of this class to be called (via a temp
     # sources.wcs file in the directory).
     #
-    # pos hint can be None or a tuple of (ra, dec)
+    # pos hint can be None or a tuple of (ra, dec). Unfortunately we
+    #     can't give just one as solve-field requires a point hint
+    #     and can't be restricted in just one axis.
+    #     https://github.com/dstndstn/astrometry.net/issues/341
     # scale_hint can be None, or a number, or tuple of (lower, upper)
     # parity_hint can be 1, 0 (or None), -1
     def solve_field(self, objects, width, height, pos_hint = None, scale_hint = None, parity_hint = None):
@@ -110,9 +113,13 @@ class Astrometry:
         position = []
         if pos_hint:
             ra, dec = pos_hint
-            if ra is not None and dec is not None:
+            if ra is not None:
+                position.extend(["--ra", str(ra)])
+            if dec is not None:
+                position.extend(["--dec", str(dec)])
+            if position:
                 # 10 degrees is enough to speed things up in most cases
-                position = ["--ra", str(ra), "--dec", str(dec), "--radius", "10"]
+                position.extend(["--radius", "10"])
 
         if not position:
             if hemisphere == "northern":

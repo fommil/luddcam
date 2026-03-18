@@ -84,14 +84,34 @@ Plate solving is only enabled in LIVE and SINGLE mode to conserve power. The fir
 <img src="./test_data/osc/assertions/live_plate_e.png" width="30%">
 </p>
 
-When plate solving is enabled, we can check and correct our polar alignment. Press `A` to lock in the current DEC, then slew only the RA axis to collect lots of samples across as wide a range as possible (they are automatically gathered when the camera settles and plate solving succeeds). Press `A` one more time to bring up a crosshair target on screen. Using only the alt/az screws on the mount's polar wedge, center the cross hair (as in this screenshot).
+When plate solving is enabled, we can check and correct our polar alignment (this example uses a different camera and scope). Press `A` to lock in the current DEC
 
 <p align="center">
-<img src="./test_data/osc/assertions/live_polar2.png" width="30%">
-<img src="./test_data/osc/assertions/live_polar2_e.png" width="30%">
+<img src="./test_data/asi220mm/assertions/live_1_align.png" width="30%">
+<img src="./test_data/asi220mm/assertions/live_1_align_e.png" width="30%">
 </p>
 
-Press `A` again to finish polar alignment. You can do this as many times as you want to improve the accuracy of your alignment. It is impossible to do this in one step without knowing the alt/az geometry (which could be inferred from the location and time of day if GPS were available), so doing this 2 or 3 times is recommended.
+then slew only the RA axis to collect lots of samples across as wide a range as possible (they are automatically gathered when the camera settles and plate solving succeeds).
+
+<p align="center">
+<img src="./test_data/asi220mm/assertions/live_2_align.png" width="30%">
+<img src="./test_data/asi220mm/assertions/live_2_align_e.png" width="30%">
+</p>
+<p align="center">
+<img src="./test_data/asi220mm/assertions/live_3_align.png" width="30%">
+<img src="./test_data/asi220mm/assertions/live_3_align_e.png" width="30%">
+</p>
+
+Press `A` one more time to bring up a crosshair target on screen. Using only the alt/az screws on the mount's polar wedge, center the cross hair.
+
+<p align="center">
+<img src="./test_data/asi220mm/assertions/live_3_align_result.png" width="30%">
+<img src="./test_data/asi220mm/assertions/live_3_align_result_e.png" width="30%">
+</p>
+
+The square shows where we were originally centered which has the indicated polar alignment error. If you're a true luddite, you will accidentally move your mount's RA/DEC instead of the polar wedge; you can get away with it by pointing back to the square before remembering that you're supposed to use the alt/az screws on your tripod.
+
+Press `A` again to finish polar alignment. You can do this as many times as you want to check or improve the accuracy of your alignment.
 
 Advanced: `LEFT` / `RIGHT` are shortcuts to cycle through the capture modes and `UP` will toggle plate solving.
 

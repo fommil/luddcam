@@ -2,6 +2,7 @@
 # scripts that use the app and then assert on screenshots of the app and the
 # existence of output files.
 
+import collections
 import glob
 import pathlib
 import os
@@ -15,6 +16,9 @@ test_mode = False
 
 # how much faster time passes than reality
 warp = 1.0
+
+# the test decides when to progress the images in the camera
+index = 0
 
 def output_dir():
     return f"test_data/{test_mode}/output"
@@ -69,18 +73,25 @@ class Camera:
 
         # pre-load all the data because otherwise it impacts
         # the playback warp (it can take a second to load each!)
-        self.data = {}
+        self.data = collections.defaultdict(lambda: collections.defaultdict(dict))
         for e in exposures:
             s = pathlib.Path(e).name.split(".")[0]
+            exposure = None
+            gain = None
+            i = 0
+            parts = s.split("-")
+            if len(parts) == 2:
+                s = parts[0]
+                i = int(parts[1])
             parts = s.split("_")
             if len(parts) == 2:
                 gain, exposure = map(float, parts)
             elif len(parts) == 1:
-                gain = None
                 exposure = float(parts[0])
             img, _ = luddcam_images.load_fits(e)
-            #print(f"registering data for {(gain, exposure)}")
-            self.data[(gain, exposure)] = img
+            print(f"registering data for {(exposure, gain, i)}")
+
+            self.data[float(exposure)][gain][i] = img
 
     def get_temp(self):
         pass
@@ -91,7 +102,8 @@ class Camera:
         self.exposure = float(exposure)
 
     def capture_wait(self):
-        return self.ready < time.monotonic()
+        if self.get_frame() is not None:
+            return self.ready < time.monotonic()
 
     def capture_stop(self):
         self.status = None
@@ -100,10 +112,14 @@ class Camera:
     def capture_finish(self):
         assert(self.capture_wait())
         self.capture_stop()
-        key = (self.gain, self.exposure)
-        #print(f"looking for data in {(self.gain, self.exposure)}")
-        # we require all combinations to exist
-        return self.data[key]
+        # print(f"looking up {(float(self.exposure), self.gain)}")
+        return self.get_frame()
+
+    def get_frame(self):
+        entries = self.data[float(self.exposure)][self.gain]
+        if entries:
+            i = index % len(entries)
+            return entries[i]
 
 # the tests can read this and assert on the contents.
 # it's actually a PIL.Image

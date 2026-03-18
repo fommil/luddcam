@@ -356,12 +356,13 @@ if __name__ == "__main__":
 
     ref_frame = None
     i = 0
-    # FIXME use the newer test data
+
+    # FIXME implement guiding
     for f in sorted(glob.glob("tmp/guiding/*.fit.fz")):
         i = i + 1
-        # if i > 10:
-        #     break
-        img, _ = load_fits(f, 4)
+        if i > 100:
+            break
+        img, _ = load_fits(f, 4) # was saved with the zwo bugs
 
         frame = find_guide_stars(img, bit_depth, d)
 
@@ -373,6 +374,14 @@ if __name__ == "__main__":
                 # if this happens too many times in a row or gets too big, we
                 # should consider resetting the reference frame.
                 print("failed to find the diff")
+            elif max(abs(x) for x in diff) > 5:
+                # epic fail, camera must have been knocked or repointed. This
+                # realistically needs a recalibration due to rotation induced by
+                # sag or bad alignment, we could theoretically account for that
+                # by looking for systemic biases in our corrections or
+                # estimating the misalignment, but that's not the luddite way.
+                print("RESET")
+                ref_frame = frame
             else:
                 all_diffs.append(diff)
                 print(diff)

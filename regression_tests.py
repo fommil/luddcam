@@ -9,7 +9,6 @@ import traceback
 import threading
 import time
 
-
 import mocks
 import luddcam
 import luddcam_settings
@@ -25,6 +24,10 @@ def key(k, i = 1):
         i -= 1
         pygame.event.post(pygame.event.Event(pygame.KEYDOWN, {"key": k}))
         nothing(1)
+
+# if the test data has multiple captures, this progresses them
+def step():
+    mocks.index += 1
 
 def up(i = 1):
     key(pygame.K_UP, i)
@@ -140,15 +143,18 @@ def run():
     finally:
         quit()
 
-if __name__ == '__main__':
-    # make this an input parameter, have many tests
-    mocks.test_mode = "osc"
-    mocks.warp = 4.0
+def run_regression_test(test_mode, force, warp = 4.0):
+    mocks.test_mode = test_mode
+    mocks.warp = warp
+    mocks.index = 0
 
+    # just a check to make sure the user knows about the deletion
     if os.path.exists(luddcam_settings.SETTINGS_FILE):
-        # tests require a clean environment to run, externally managed
-        print(f"ERROR: {luddcam_settings.SETTINGS_FILE} exists", file=sys.stderr)
-        sys.exit(1)
+        if force:
+            os.remove(luddcam_settings.SETTINGS_FILE)
+        else:
+            print(f"ERROR: {luddcam_settings.SETTINGS_FILE} exists", file=sys.stderr)
+            sys.exit(1)
 
     os.makedirs(f"test_data/{mocks.test_mode}/assertions", exist_ok=True)
 
@@ -167,6 +173,17 @@ if __name__ == '__main__':
         traceback.print_exc()
 
     time.sleep(1) # or we never exit
+
+if __name__ == '__main__':
+    args = sys.argv[1:]
+    force = "-force" in args
+    if force:
+        args.remove("-force")
+    if args:
+        run_regression_test(args[0], force)
+    else:
+        run_regression_test("asi220mm", force)
+        run_regression_test("osc", force)
 
 # Local Variables:
 # compile-command: "./luddcam.sh test"

@@ -530,7 +530,7 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
             size = 10
             thickness = 3
             # where we probed (debugging really)
-            pygame.draw.rect(img_surface, WHITE, (x1 - 2, y1 - 2, 4, 4), 0)
+            pygame.draw.rect(img_surface, WHITE, (x1 - 4, y1 - 4, 8, 8), 0)
             # where we are
             pygame.draw.circle(img_surface, WHITE, (width // 2, height // 2), size, 2)
             # where we need to go
@@ -603,10 +603,10 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
                     delta_ra = round(abs(ra_diff(lo, hi)))
                     quality = ""
                     proceed = True
-                    if 3 < len(ps) or delta_ra < 45:
+                    if len(ps) < 3 or delta_ra < 45:
                         quality = "not good"
                         proceed = False
-                    elif delta_ra < 90:
+                    elif len(ps) < 4 or delta_ra < 90:
                         quality = "OK"
                     else:
                         quality = "good"
@@ -620,7 +620,7 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
                 # user needs to make. Doing pythagoras on this is heresy but
                 # it's approximately accurate since it is small.
                 err = math.hypot(*solver_hints.align_error)
-                top_left2 = f"[{format_dms(err)}] polar align to crosshairs → press A"
+                top_left2 = f"[PAE {format_dms(err)}] polar align ALT/AZ to target → press A"
 
     top_left2_text = font.render(top_left2, True, WHITE)
     top_left2_rect = top_left2_text.get_rect()
@@ -739,6 +739,10 @@ class Menu:
             with self.capture.lock:
                 self.capture.live_cap = val
 
+        # arguably live_cap should be in the settings menu but since its
+        # something that needs to be changed depending on the sky conditions and
+        # location and can't really be estimated in advance so I make the design
+        # decision to put it in secondary actions.
         live_exposure_options = [1, 2, 3, 4, 5]
         menu.add.selector(
             "Live limit: ",
@@ -921,7 +925,10 @@ if __name__ == "__main__":
     hints.align_samples = [(146.863510433, 24.4932219664),
                            (91.9389180732, 24.6341121843),
                            (55.3696507467, 24.3101586984)]
-    hints.align_targets = ((156.600466429, 24.4012276267),
+    # hints.align_targets = ((156.600466429, 24.4012276267),
+    #                        (156.8726162416188, 24.932472683662183))
+    # here using the "probe" value to double up as the original algo solution
+    hints.align_targets = ((156.598475782, (24.3985386574 + 24.6341121843) / 2),
                            (156.8726162416188, 24.932472683662183))
     hints.align_error = (0.25256720302354435, 0.7575697858059458)
 

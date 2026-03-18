@@ -32,6 +32,8 @@ else
     IS_RPI=false
 fi
 
+export PYGAME_HIDE_SUPPORT_PROMPT=1
+
 #echo "luddcam.sh: LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
 
 case "${1:-}" in
@@ -53,9 +55,6 @@ case "${1:-}" in
 
             # probably installed already, used by gpio based screens
             sudo apt install python3-spidev python3-gpiozero
-
-            # TODO should we maybe update the firmware config file
-            #      to save the user from using the gui?
         fi
 
         # needed on debian, safe and sensible on the pi
@@ -66,11 +65,7 @@ case "${1:-}" in
         sudo install -m 444 libasi/linux/udev/99-asi.rules /etc/udev/rules.d/
         ;;
     test)
-        if [ "${2:-}" = "-force" ] ; then
-            rm -f luddcam-settings.json || true
-        fi
-
-        exec python3 regression_tests.py | grep -v DETECT_AVX2
+        exec python3 regression_tests.py "${@:2}"
         ;;
     *)
         if $IS_RPI ; then

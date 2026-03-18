@@ -50,7 +50,11 @@ def plate_solve(hints, centroids, width, height, scale_factor, pixel_size, polar
     scale_hint = hints.pixscale
     if scale_hint is None:
         scale_hint = (scale_factor * 0.5, None)
-    pos_hint = (hints.ra_center, hints.dec_center)
+    if polar_align is False:
+        # if we're doing alignment, drop the RA hint
+        pos_hint = (None, hints.dec_center)
+    else:
+        pos_hint = (hints.ra_center, hints.dec_center)
     parity_hint = hints.parity
 
     relevant_stars, relevant_dsos, polar_alignment_points, polar_alignment_targets = None, None, None, None
@@ -117,12 +121,16 @@ def plate_solve(hints, centroids, width, height, scale_factor, pixel_size, polar
                     polar_alignment_points = [tuple(a) for a in solver.radec_to_pixels(ras)]
 
             case True:
+                current = (hints.ra_center, hints.dec_center)
                 # show the alignment target
                 if hints.align_targets is None:
-                    probe = (hints.ra_center, hints.dec_center)
-                    pole, align_error = find_pole(hints.align_samples, probe)
-                    hints.align_targets = (probe, pole)
-                    hints.align_error = align_error
+                    pole, soln = find_pole(hints.align_samples, current)
+                    hints.align_targets = (current, pole)
+                    hints.align_error = soln
+
+                # TODO it would be good to update the align_error to give a
+                # realtime estimate of how close we are but that seems to
+                # involve a full resolve and I'd rather minimise cost.
 
                 probe, pole = hints.align_targets
                 if pole is not None:
@@ -152,7 +160,6 @@ def plate_solve(hints, centroids, width, height, scale_factor, pixel_size, polar
 # back to RA,DEC space.
 def find_pole(samples, current):
     print(f"[find_pole] {samples} {current}")
-
     cost = alignment_cost_function(samples)
     start = global_search(cost)
     soln = minimize(cost, start)
@@ -164,7 +171,7 @@ def find_pole(samples, current):
     t = rot3d(dec_err, ra_err, 0)
     target = xyz_to_radec(t @ radec_to_xyz(current))
 
-    print(f"[find_pole] {target} {soln}")
+    #print(f"[find_pole] {target} {soln}")
 
     return target, soln
 

@@ -113,7 +113,6 @@ def main():
 
     while True:
         events = pygame.event.get()
-        # FIXME on the epaper rpi I often see the joystick getting stuck with DOWN
         for event in events:
             # print(f"DEBUG: received event {event}")
             if event.type in [pygame.JOYDEVICEADDED, pygame.JOYDEVICEREMOVED]:

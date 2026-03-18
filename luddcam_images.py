@@ -516,6 +516,18 @@ def mk_metadata(exp, camera, filt, cooling, plate):
 
     return metadata
 
+# used for resaving files, and will probably drift from the above
+def header_to_metadata(h):
+    metadata = []
+    valid = ["PROGRAM", "DATE", "EXPTIME", "FILTER", "BITDEPTH",
+             "XPIXSZ", "YPIXSZ", "INSTRUME", "CCD-TEMP", "SET-TEMP",
+             "GAIN", "OFFSET", "BAYERPAT", "ROWORDER",
+             "RA", "DEC", "FOCALLEN"]
+    for v in valid:
+        if v in h:
+            metadata.append((v, h[v]))
+    return metadata
+
 # we write the data to the file, and then callback view.save with the filename
 # to denote that the save succeeded or failed. It is possible, for relatively
 # fast exposures that the surface has already moved on and in those cases we
@@ -600,7 +612,7 @@ def load_fits(f, shift = 0):
 
     # bottom-up becomes top-down
     img = np.flipud(fits.read())
-    h = fits.read_header()
+    h = dict(fits.read_header())
     if shift > 0:
         # undoes asiair bullshit
         img = img >> shift
@@ -612,3 +624,19 @@ def get_corrected_bayer(h):
     if bayer and h.get("ROWORDER") != 'BOTTOM-UP':
         return bayer[2:4] + bayer[0:2]
     return bayer
+
+if __name__ == '__main__':
+#    exit(1)
+
+    # fixes badly saved files that have the wrong bitshift
+    import glob
+    for f in glob.glob("tmp/align/*.fit.fz"):
+        print(f)
+        img, h = load_fits(f, 4)
+        metadata = header_to_metadata(h)
+        name = os.path.basename(f)
+        FitsWriter(None, img, f"test_data/asi220mm/exposures/{name}", metadata).run()
+
+# Local Variables:
+# compile-command: "python3 luddcam_images.py"
+# End:

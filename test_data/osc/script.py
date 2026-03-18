@@ -127,5 +127,5 @@ expect_images(7)
 # TODO assert on the data and metadata of the output fits
 
 # Local Variables:
-# compile-command: "cd ../../ ; ./luddcam.sh test"
+# compile-command: "cd ../../ ; ./luddcam.sh test -force osc"
 # End:
