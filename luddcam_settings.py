@@ -701,9 +701,16 @@ class Menu:
             options.append(gain)
             options = [o for o in options if self.camera.gain_min <= o <= self.camera.gain_max]
             options = sorted(set(options))
+            def render_gain(g):
+                if g == self.camera.gain_unity:
+                    return f"{g} (unity)"
+                elif g == self.camera.gain_hc:
+                    return f"{g} (hcg)"
+                else:
+                    return f"{g}"
             menu.add.selector(
                 "Gain: ",
-                items=[(f"{i}", i) for i in options],
+                items=[(render_gain(i), i) for i in options],
                 default=options.index(gain),
                 onchange=update_gain,
                 align=ALIGN_LEFT)
