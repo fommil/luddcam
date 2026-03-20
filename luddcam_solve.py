@@ -18,7 +18,6 @@ class SolverHints:
         self.parity = None
         self.focal_length = None # informational from last solve
         self.fails = 0 # counts the number of fails in a row
-        self.merged = 0 # counts of merged stars
         self.align_samples = [] # (ra,dec) pairs of samples slewed on RA axis only
         self.align_targets = None # or a two tuple of ra,dec of the probe and target
         self.align_error = None # the exact ra/dec translation error
@@ -35,17 +34,15 @@ class PlateSolution:
 # e.g. if a raw image is reduced 8x for display, scale_factor should be set to 8.
 #
 # mutates "hints", returns an optional PlateSolution
-def plate_solve(hints, centroids, width, height, scale_factor, pixel_size, polar_align):
+def plate_solve(hints, centroids, width, height, scale_factor, pixel_size, polar_align, full_catalog):
     if hints is None or len(centroids) < 10:
         return None
 
-    # if the number of "merged" centroids has jumped dramatically since the last
-    # successful solve, then skip for a few frames since this is an indicator
-    # that the scope is being slewed.
-    merged = np.sum((centroids['flag'] & sep.OBJ_MERGED) != 0)
-    if hints.merged and hints.merged * 2 < merged and hints.fails < 10:
-        hints.fails += 1
-        return None
+    # if the number of "merged" centroids is too high then consider skipping for
+    # a few frames since this is an indicator that the scope is being slewed.
+    merged = np.sum((centroids['flag'] & sep.OBJ_MERGED) != 0) / len(centroids)
+    if merged > 0.5:
+        print(f"noteworthy number of merged stars {merged}")
 
     scale_hint = hints.pixscale
     if scale_hint is None:
@@ -79,7 +76,6 @@ def plate_solve(hints, centroids, width, height, scale_factor, pixel_size, polar
             hints.fails += 1
             return None
         hints.fails = 0
-        hints.merged = merged
         #print(bounds)
         ra_min = bounds["ramin"]
         ra_max = bounds["ramax"]
@@ -106,7 +102,7 @@ def plate_solve(hints, centroids, width, height, scale_factor, pixel_size, polar
             case None:
                 # no polar alignment, show labels
                 stars = luddcam_catalog.relevant_stars(dec_min, dec_max, ra_min, ra_max)
-                dsos = luddcam_catalog.relevant_dsos(dec_min, dec_max, ra_min, ra_max)
+                dsos = luddcam_catalog.relevant_dsos(full_catalog, dec_min, dec_max, ra_min, ra_max)
                 relevant_stars = solver.with_radec_to_pixels(stars)
                 relevant_dsos = solver.with_radec_to_pixels(dsos)
             case False:
@@ -130,7 +126,8 @@ def plate_solve(hints, centroids, width, height, scale_factor, pixel_size, polar
 
                 # TODO it would be good to update the align_error to give a
                 # realtime estimate of how close we are but that seems to
-                # involve a full resolve and I'd rather minimise cost.
+                # involve a full resolve (or at the very least some cos/sin
+                # calculations).
 
                 probe, pole = hints.align_targets
                 if pole is not None:
@@ -168,10 +165,13 @@ def find_pole(samples, current):
     # it is not accurate to simply add the soln to the current, we have to
     # translate properly. This is because a degree near the pole is a lot
     # smaller than a degree at the equator.
+    #
+    # Also recall that t transforms the actual celestial sphere to where
+    # our mount is, to fix our mount we need to do the opposite!
     t = rot3d(dec_err, ra_err, 0)
-    target = xyz_to_radec(t @ radec_to_xyz(current))
+    target = xyz_to_radec(t.T @ radec_to_xyz(current))
 
-    #print(f"[find_pole] {target} {soln}")
+    print(f"[find_pole] target={target} soln={soln}")
 
     return target, soln
 
@@ -198,6 +198,16 @@ def global_search(cost):
             grid[i, j] = cost((yaw, pitch))
 
     i, j = np.unravel_index(grid.argmin(), grid.shape)
+
+    # uncomment to visualise the solution space
+    # print(f"global solution seems to be at {(yaws[i], pitches[j])}")
+    # import matplotlib.pyplot as plt
+    # plt.imshow(grid)
+    # from matplotlib.patches import Circle
+    # circle = Circle((i, j), radius=1.5, fill=False, edgecolor='red', linewidth=2)
+    # plt.gca().add_patch(circle)
+    # plt.show()
+
     return yaws[i], pitches[j]
 
 # incredibly simple and inefficient but it doesn't need to be fancy
@@ -227,8 +237,10 @@ def xyz_to_radec(xyz):
     ra = math.degrees(math.atan2(y, x)) % 360
     return ra, dec
 
-# returns a lambda that takes a numpy array of
-# [pitch_err, yaw_err] ~(RA, DEC)
+# returns a lambda that takes a numpy array of [RA, DEC, DEC']
+# where the first two are the pole correction and DEC' is the
+# declination of the samples.
+#
 # and returns the cost relative to a circle
 # created at that point by rotating the celestial sphere.
 #
@@ -296,19 +308,56 @@ if __name__ == "__main__":
                (55.3696507467, 24.3101586984),
                (156.600466429, 24.4012276267)]
 
+    # more examples, these failed to improve alignment with the 3d pole algo.
+    # the last two are perhaps the most relevant as they were near the equator
+    # and I nailed the proposed solution.
+
+    # [find_pole] [(184.557711523, 47.3020338355), (178.235992085, 47.3791030271), (170.667077006, 47.4670672177), (163.117970443, 47.5454474438), (146.36495886, 47.6824432972), (128.671207202, 47.7562182034), (111.501960914, 47.7670589104), (97.7230865444, 47.7174193781), (88.9719322237, 47.7786354833)] (88.9748514261, 47.7784066009)
+    # [find_pole] [(88.9499967145, 48.396557105), (95.1762884536, 48.3133429989), (101.791005933, 48.2292487112), (111.877176828, 48.0691647484), (124.119858794, 47.8321937786), (137.787261386, 47.5503543383), (141.010841692, 47.4776045032), (173.711049973, 46.6838659719)] (173.654684786, 46.6933137019)
+
+
+    # [find_pole] [(200.739602408, 3.70775359332), (204.836343627, 3.64802468801), (168.244560521, 4.0064205949), (158.856207586, 4.04078968189), (150.390625329, 4.04239287409), (142.018016536, 4.01864147753), (135.696397212, 3.988203533), (130.48048423, 3.94586253894)] (130.479615497, 3.94490821295)
+    samples = [(200.739602408, 3.70775359332),
+               (204.836343627, 3.64802468801),
+               (168.244560521, 4.0064205949),
+               (158.856207586, 4.04078968189),
+               (150.390625329, 4.04239287409),
+               (142.018016536, 4.01864147753),
+               (135.696397212, 3.988203533),
+               (130.48048423, 3.94586253894)]
+    current = (130.479615497, 3.94490821295)
+    # luddcam 5c338e8 solved to target=(130.44296577933886, 4.91442094258386) soln=(0.9595943474615415, 0.4545582876243784)
+    # [find_pole] [(130.400230128, 4.89536566237), (135.832218965, 5.02427225774), (141.783431457, 5.10666137249), (149.733590213, 5.23237013664), (158.464473757, 5.32406206281), (169.198019603, 5.36463750117), (175.082318828, 5.34956701518), (180.373773852, 5.31400182341), (200.231228693, 4.99777581708), (205.573798767, 4.87363711428)] (205.57296167, 4.87467448314)
+
+    samples = [(130.400230128, 4.89536566237),
+               (135.832218965, 5.02427225774),
+               (141.783431457, 5.10666137249),
+               (149.733590213, 5.23237013664),
+               (158.464473757, 5.32406206281),
+               (169.198019603, 5.36463750117),
+               (175.082318828, 5.34956701518),
+               (180.373773852, 5.31400182341),
+               (200.231228693, 4.99777581708),
+               (205.573798767, 4.87363711428)]
+    current = (205.57296167, 4.87467448314)
+    # luddcam 5c338e8 solved to target=(205.70118015043897, 6.634966914527325) soln=(2.1717173758383503, 0.4545600080502908)
+    # which is away from the original soln by almost a degree in RA
+
+    # FIXME FIXME FIXME investigate why polar alignment is so shit
+
     target, soln = find_pole(samples, samples[-1])
     print(f"target = {target}")
 
     fig = plt.figure()
     ax = fig.add_subplot(projection='3d')
+    ax.set_axis_off()
 
     # our sample data and its naive circle
-    orig = np.array([radec_to_xyz(rd) for rd in samples])
-    ax.scatter(orig[:, 0], orig[:, 1], orig[:, 2], c="red", s=20)
+    samples_xyz = np.array([radec_to_xyz(rd) for rd in samples])
+    ax.scatter(samples_xyz[:, 0], samples_xyz[:, 1], samples_xyz[:, 2], c="red", s=20)
     dec_ = float(np.mean(np.array(samples)[:,1]))
-    #sample_circle = [(ra, dec_) for ra in range(360)]
-    #circle = np.array([radec_to_xyz(rd) for rd in sample_circle])
-    #ax.scatter(circle[:, 0], circle[:, 1], circle[:, 2], c="red")
+    bad_circle = np.array([radec_to_xyz(rd) for rd in [(ra, dec_) for ra in range(360)]])
+    ax.scatter(bad_circle[:, 0], bad_circle[:, 1], bad_circle[:, 2], c="red", s=1)
 
     # current mount pole
     ax.scatter([0], [0], [1], c='red', s=100)
@@ -319,6 +368,7 @@ if __name__ == "__main__":
     sphere = np.array([radec_to_xyz((ra, dec)) for dec in np.linspace(-80, 80, 20) for ra in np.linspace(0, 360, 10)])
     ax.scatter(sphere[:, 0], sphere[:, 1], sphere[:, 2], c='grey', s=2)
 
+
     # the solution / celestial pole
     ra_err, dec_err = soln
     t = rot3d(dec_err, ra_err, 0)
@@ -327,8 +377,22 @@ if __name__ == "__main__":
     target_ = radec_to_xyz(target)
     ax.scatter(target_[0], target_[1], target_[2], c="blue", s=20)
 
-    ax.set_aspect('equal')
+    # we have the transform but we actually don't know which dec fits our
+    # original data to plot it, this calculates it
+    dec_fit = dec_
+    dec_err = None
+    for d in np.linspace(dec_ - 5, dec_ + 5, 100):
+        fit = np.array([t @ radec_to_xyz((ra, d)) for ra, _ in samples])
+        err = np.mean((fit - samples_xyz) ** 2)
+        if dec_err is None or err < dec_err:
+            dec_err = err
+            dec_fit = d
 
+#    dec_fit = dec_ - target[1] + 1 # hack
+    fit_circle = np.array([t @ radec_to_xyz(rd) for rd in [(ra, dec_fit) for ra in range(360)]])
+    ax.scatter(fit_circle[:, 0], fit_circle[:, 1], fit_circle[:, 2], c="blue", s=1)
+
+    ax.set_aspect('equal')
     plt.show()
 
 # Local Variables:

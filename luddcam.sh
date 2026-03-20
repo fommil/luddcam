@@ -65,7 +65,16 @@ case "${1:-}" in
         sudo install -m 444 libasi/linux/udev/99-asi.rules /etc/udev/rules.d/
         ;;
     test)
-        exec python3 regression_tests.py "${@:2}"
+        if [ -n "$2" ]; then
+            files="$2"
+        else
+            files="test_data/*"
+        fi
+
+        for t in $files; do
+            rm -f luddcam-settings.json || true
+            python3 regression_tests.py "$(basename $t)"
+        done
         ;;
     *)
         if $IS_RPI ; then

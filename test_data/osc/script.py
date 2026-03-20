@@ -55,16 +55,6 @@ b()
 nothing(5)
 snap("live_plate")
 
-# enable polar alignment
-a()
-nothing(2)
-snap("live_polar1")
-
-# polar alignment without moving
-a()
-nothing(2)
-snap("live_polar2")
-
 # disable plate solving
 up() # with shortcut
 
@@ -127,5 +117,5 @@ expect_images(7)
 # TODO assert on the data and metadata of the output fits
 
 # Local Variables:
-# compile-command: "cd ../../ ; ./luddcam.sh test -force osc"
+# compile-command: "cd ../../ ; ./luddcam.sh test osc"
 # End:

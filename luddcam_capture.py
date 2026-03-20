@@ -332,6 +332,7 @@ class View:
         self.saved = False
 
         self.plate_solve = False
+        self.full_catalog = False
         self.align = None # None = Not aligning | False = data gather | True = plot target
         self.hints = None
 
@@ -345,6 +346,14 @@ class View:
     def get_plate_solve(self):
         with self.lock:
             return self.plate_solve
+
+    def set_full_catalog(self, val):
+        with self.lock:
+            self.full_catalog = val
+
+    def get_full_catalog(self):
+        with self.lock:
+            return self.full_catalog
 
     def toggle_align(self):
         with self.lock:
@@ -397,6 +406,7 @@ class View:
             is_paused = self.is_paused
             saved = self.saved
             plate_solve = self.plate_solve
+            full_catalog = self.full_catalog
             hints = self.hints
             align = self.align
             # doing it here instead of after avoids many timing issues
@@ -412,7 +422,7 @@ class View:
                 surface.blit(text, rect)
         else:
             is_saved = saved == out
-            render_frame_for_screen(surface, img_raw, zoom, meta, out, self.font_small, is_paused, is_saved, hints, align, plate_solve)
+            render_frame_for_screen(surface, img_raw, zoom, meta, out, self.font_small, is_paused, is_saved, hints, align, plate_solve, full_catalog)
 
     def message(self, msg):
         self.set_data(None, msg, None)
@@ -444,7 +454,7 @@ class View:
             self.stale = True
 
 # moved out for easier manual testing. Mutates the solver_hints
-def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, saved, solver_hints, polar_align, attempt_solve):
+def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, saved, solver_hints, polar_align, attempt_solve, full_catalog):
     raw_height, raw_width = img_raw.shape
     target_width, target_height = surface.get_size()
 
@@ -458,10 +468,20 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
     bayer = meta.get("BAYERPAT")
     long_exposure = meta.get("EXPTIME", 0) >= 1
     render_quality = stage is not Stage.LIVE and long_exposure
-    img_rgb, img_mono = downscale(img_raw, target_width, target_height, zoom, bayer, render_quality)
+    img_rgb, _ = downscale(img_raw, target_width, target_height, zoom, bayer, render_quality)
     height, width, _ = img_rgb.shape
     end = time.perf_counter()
     print(f"downscale took {end - start}")
+
+    # A high resolution mono image that is useful for plate solving and focus
+    # magic. We throw away data in pairs of two, which effectively means picking
+    # the first colour in the bayer for OSC. We also take the opportunity to
+    # downscale big (full frame) images that are overkill.
+    def compute_mono():
+        if bayer is None and raw_width <= 2048:
+            return img_raw.astype(np.float32)
+        else:
+            return pixel_sample(img_raw, min(raw_width // 2, 2000), min(raw_height // 2, 2000)).astype(np.float32)
 
     # plate solving is relatively expensive and it might seem silly to do it
     # here and block this thread, but it is the only way to do it in a way
@@ -471,14 +491,8 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
     centroids = []
     solution = None
     if solve:
-        # we throw away data in pairs of two, which effectively means picking
-        # the first colour in the bayer for OSC. We also take the opportunity to
-        # downscale big (full frame) images that are overkill.
+        img_mono = compute_mono()
 
-        if bayer is None and raw_width <= 2048:
-            img_mono = img_raw.astype(np.float32)
-        else:
-            img_mono = pixel_sample(img_raw, min(raw_width // 2, 2000), min(raw_height // 2, 2000)).astype(np.float32)
         # relative to displayed image, for solving
         scale_factor_v = img_mono.shape[0] / height
         # print(f"factors = {scale_factor}, {scale_factor_v}")
@@ -490,14 +504,14 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
         # scaled centroids relative to original (for focal length calc)
         scale_factor = raw_height / height
         #print(f"trying to solve with {len(centroids)}")
-        solution = plate_solve(solver_hints, centroids, width, height, scale_factor, meta.get("XPIXSZ"), polar_align)
+        solution = plate_solve(solver_hints, centroids, width, height, scale_factor, meta.get("XPIXSZ"), polar_align, full_catalog)
 
     focus_magic = None
-    if zoom and stage == Stage.LIVE and img_mono is not None:
-        # we could calculate focus magic on the entire image, but that can be
-        # slow and introduce frustrating lag. Therefore we use the zoomed region
-        # which has been carefully prepared for us already. Note that the
-        # difference in the numbers can be quite substantial, so maybe revisit.
+    if zoom and stage == Stage.LIVE:
+        # focus magic uses the same frame as plate solving. If we only use the
+        # restricted region we can struggle to find enough centroids and have to
+        # think about bayer.
+        img_mono = compute_mono()
         start = time.perf_counter()
         centroids = luddcam_astrometry.source_extract(img_mono.astype(np.float32))
         end = time.perf_counter()
@@ -668,9 +682,11 @@ class Prefs:
                  mode = Mode.SINGLE,
                  live_cap = 1,
                  plate_solve = False,
+                 full_catalog = False,
                  hints = SolverHints()):
         self.mode = mode
         self.live_cap = live_cap
+        self.full_catalog = full_catalog
         self.plate_solve = plate_solve
 
         # the camera can change which can mess all of this up,
@@ -691,6 +707,7 @@ class Menu:
         self.epaper = epaper
         self.view = View(w, h)
         self.view.hints = prefs.hints
+        self.view.full_catalog = prefs.full_catalog
         self.view.plate_solve = prefs.plate_solve
         self.zoom = False # used to capture BACK
 
@@ -735,6 +752,17 @@ class Menu:
             state_color=(BLACK, BLACK),
             align=ALIGN_LEFT)
 
+        def select_full_catalog(a):
+            #print(f"toggling plate solving, got {a}")
+            self.view.set_full_catalog(a)
+        menu.add.toggle_switch(
+            "Catalog",
+            self.view.get_full_catalog(),
+            state_text=('Small', 'Full'),
+            onchange=select_full_catalog,
+            state_color=(BLACK, BLACK),
+            align=ALIGN_LEFT)
+
         def select_live_cap(a, val):
             with self.capture.lock:
                 self.capture.live_cap = val
@@ -761,9 +789,10 @@ class Menu:
                 mode = self.capture.mode
                 live_cap = self.capture.live_cap
         with self.view.lock:
+            full_catalog = self.view.full_catalog
             plate_solve = self.view.plate_solve
             hints = self.view.hints
-        return Prefs(mode, live_cap, plate_solve, hints)
+        return Prefs(mode, live_cap, plate_solve, full_catalog, hints)
 
     def cancel(self):
         if self.capture:
@@ -935,7 +964,7 @@ if __name__ == "__main__":
     align = True
 
     start = time.perf_counter()
-    render_frame_for_screen(surface, img_raw, zoom, meta, out, font, False, False, hints, align, True)
+    render_frame_for_screen(surface, img_raw, zoom, meta, out, font, False, False, hints, align, True, False)
     end = time.perf_counter()
     print(f"rendering took {end - start:.2f}")
 

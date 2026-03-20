@@ -112,10 +112,34 @@ class AsyncEpd:
         return self.epd.getbuffer(img)
 
     def run(self):
+        cached = None
         while True:
-            item = self.queue.get()
-            if item is None:
-                return
+            # skip over events of the same type so that we don't create an
+            # infinite backlog of work if we can't render as fast as items are
+            # coming in. This is implemented in a clunky way because we can't
+            # push items back into the queue.
+            if cached is not None:
+                item = cached
+                cached = None
+            else:
+                item = self.queue.get()
+                if item is None:
+                    return
+
+            def peek():
+                try:
+                    return self.queue.get(block = False)
+                except queue.Empty:
+                    return None
+
+            while (e := peek()) is not None:
+                # partial updates should always be trumped
+                if e[0] == item[0] or item[0] == "display_Partial":
+                    item = e
+                else:
+                    cached = e
+                    break
+
             # print(f"e-Paper running {item[0]}")
             match item[0]:
                 case "init":

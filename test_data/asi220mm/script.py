@@ -17,15 +17,16 @@ snap("settings_3")
 
 # go to live view
 select()
-# change live cap to 4 seconds
 b()
 down()
 down()
+a() # enable ngc catalog
+down()
+# change live cap to 4 seconds
 right()
 right()
 right()
 snap("secondary_action_1")
-
 b()
 
 nothing(4)
@@ -64,5 +65,5 @@ snap("live_2_plate")
 
 
 # Local Variables:
-# compile-command: "cd ../../ ; ./luddcam.sh test -force asi220mm"
+# compile-command: "cd ../../ ; ./luddcam.sh test asi220mm"
 # End:

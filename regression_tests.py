@@ -143,18 +143,15 @@ def run():
     finally:
         quit()
 
-def run_regression_test(test_mode, force, warp = 4.0):
+def run_regression_test(test_mode, warp = 4.0):
     mocks.test_mode = test_mode
     mocks.warp = warp
     mocks.index = 0
 
     # just a check to make sure the user knows about the deletion
     if os.path.exists(luddcam_settings.SETTINGS_FILE):
-        if force:
-            os.remove(luddcam_settings.SETTINGS_FILE)
-        else:
-            print(f"ERROR: {luddcam_settings.SETTINGS_FILE} exists", file=sys.stderr)
-            sys.exit(1)
+        print(f"ERROR: {luddcam_settings.SETTINGS_FILE} exists", file=sys.stderr)
+        sys.exit(1)
 
     os.makedirs(f"test_data/{mocks.test_mode}/assertions", exist_ok=True)
 
@@ -176,14 +173,7 @@ def run_regression_test(test_mode, force, warp = 4.0):
 
 if __name__ == '__main__':
     args = sys.argv[1:]
-    force = "-force" in args
-    if force:
-        args.remove("-force")
-    if args:
-        run_regression_test(args[0], force)
-    else:
-        run_regression_test("asi220mm", force)
-        run_regression_test("osc", force)
+    run_regression_test(args[0])
 
 # Local Variables:
 # compile-command: "./luddcam.sh test"

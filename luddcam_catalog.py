@@ -27,8 +27,13 @@ def filter_catalog(data, dec_min, dec_max, ra_min, ra_max):
 def relevant_stars(dec_min, dec_max, ra_min, ra_max):
     return filter_catalog(stars, dec_min, dec_max, ra_min, ra_max)
 
-def relevant_dsos(dec_min, dec_max, ra_min, ra_max, vicinity = 3, tol_arcsec=60.0):
-    filtered = filter_catalog(dsos, dec_min - vicinity, dec_max + vicinity, ra_min - vicinity, ra_max + vicinity)
+def relevant_dsos(full, dec_min, dec_max, ra_min, ra_max, vicinity = 5, tol_arcsec=60.0):
+    if full:
+        cat = dsos_full
+    else:
+        cat = dsos_lite
+        vicinity = 2 * vicinity
+    filtered = filter_catalog(cat, dec_min - vicinity, dec_max + vicinity, ra_min - vicinity, ra_max + vicinity)
     return dedupe_by_position(filtered, tol_arcsec)
 
 def dedupe_by_position(objects, tol_arcsec):
@@ -76,5 +81,6 @@ ngc = parse_siril_catalog("ngc.csv")
 ldn = parse_siril_catalog("ldn.csv")
 ic = parse_siril_catalog("ic.csv")
 sh2 = parse_siril_catalog("sh2.csv")
-dsos = messier + caldwell + ngc + ldn + ic + sh2
+dsos_lite = messier + caldwell + ldn + sh2
+dsos_full = dsos_lite + ngc + ic
 
