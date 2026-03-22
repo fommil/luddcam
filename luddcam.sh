@@ -40,7 +40,13 @@ case "${1:-}" in
     install)
         sudo apt update
         # warning: astrometry.net is massively bloated in raspberry pi and pulls in a tonne of stuff we don't need
-        sudo apt install libasi python3-pygame python3-box python3-fitsio python3-sep udevil exfatprogs fonts-hack astrometry.net astrometry-data-tycho2
+        sudo apt install python3-pygame \
+                         python3-box \
+                         python3-fitsio \
+                         python3-sep \
+                         python3-erfa \
+                         udevil exfatprogs fonts-hack \
+                         astrometry.net astrometry-data-tycho2
 
         if $IS_RPI ; then
             # workaround bug in udevil's config
@@ -65,7 +71,7 @@ case "${1:-}" in
         sudo install -m 444 libasi/linux/udev/99-asi.rules /etc/udev/rules.d/
         ;;
     test)
-        if [ -n "$2" ]; then
+        if [ -n "${2:-}" ]; then
             files="$2"
         else
             files="test_data/*"

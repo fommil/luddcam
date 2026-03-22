@@ -84,7 +84,7 @@ Plate solving is only enabled in LIVE and SINGLE mode to conserve power. The fir
 <img src="./test_data/osc/assertions/live_plate_e.png" width="30%">
 </p>
 
-When plate solving is enabled, we can check and correct our polar alignment (this example uses a different camera and scope). Press `A` to lock in the current DEC
+When plate solving is enabled, we can check and correct our polar alignment (this example uses a different camera and scope). Press `A` to lock in the current DEC (it is recommended to use a DEC near your imaging subject)
 
 <p align="center">
 <img src="./test_data/asi220mm/assertions/live_1_align.png" width="30%">
@@ -102,7 +102,7 @@ then slew only the RA axis to collect lots of samples across as wide a range as 
 <img src="./test_data/asi220mm/assertions/live_3_align_e.png" width="30%">
 </p>
 
-Press `A` one more time to bring up a crosshair target on screen. Using only the alt/az screws on the mount's polar wedge, center the cross hair.
+Press `A` one more time to bring up a crosshair target on screen, it is best to do this when pointed at roughly 45° altitude. Using only the alt/az screws on the mount's polar wedge, center the cross hair.
 
 <p align="center">
 <img src="./test_data/asi220mm/assertions/live_3_align_result.png" width="30%">

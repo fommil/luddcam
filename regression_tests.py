@@ -1,3 +1,4 @@
+import datetime
 import glob
 import os
 import numpy as np
@@ -12,6 +13,7 @@ import time
 import mocks
 import luddcam
 import luddcam_settings
+import luddcam_solve
 
 def nothing(s):
     luddcam.ready.clear()
@@ -147,6 +149,7 @@ def run_regression_test(test_mode, warp = 4.0):
     mocks.test_mode = test_mode
     mocks.warp = warp
     mocks.index = 0
+    luddcam_solve.precession = luddcam_solve.mk_precession_matrix(datetime.date(2026, 3, 23))
 
     # just a check to make sure the user knows about the deletion
     if os.path.exists(luddcam_settings.SETTINGS_FILE):

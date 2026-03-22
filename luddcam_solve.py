@@ -1,8 +1,16 @@
 # the plate and polar alignment solver
+#
+# the polar alignment algorithm is using brute force search, we could use a more
+# sophisticated approach that solves in a single step but noting that the normal
+# of a plane is the pole, c.f.
+# https://www.ilikebigbits.com/2015_03_04_plane_from_points.html
 
+import datetime
 import math
 from math import sin, cos
+import time
 
+import erfa
 import numpy as np
 import sep
 
@@ -156,10 +164,28 @@ def plate_solve(hints, centroids, width, height, scale_factor, pixel_size, polar
 # it is actually the x,y,z location of the pole, which can be converted
 # back to RA,DEC space.
 def find_pole(samples, current):
-    print(f"[find_pole] {samples} {current}")
+    print(f"[find_pole] input {samples} {current}")
     cost = alignment_cost_function(samples)
-    start = global_search(cost)
-    soln = minimize(cost, start)
+
+    limits = 5 # in degrees in each direction
+    samples = 60 # size of grid
+    arcsec = 1.0 / (60 * 60)
+
+    # we could use a local search here but it's not particularly reliable.
+    # thankfully the cost function is cheap enough to justify brute force. we
+    # progressively zoom in on the area of interest until the change is sub
+    # arcsec.
+    soln = (0, 0)
+    for i in range(5):
+        start = time.perf_counter()
+        last = soln
+        soln = global_search(cost, soln, limits, samples)
+        end = time.perf_counter()
+        print(f"[find_pole] global_search {i + 1} took {end - start} ({soln})")
+        limits = 2 * limits / samples
+        if np.linalg.norm(np.array(last) - np.array(soln)) < arcsec:
+            break
+
     ra_err, dec_err = soln
 
     # it is not accurate to simply add the soln to the current, we have to
@@ -171,7 +197,7 @@ def find_pole(samples, current):
     t = rot3d(dec_err, ra_err, 0)
     target = xyz_to_radec(t.T @ radec_to_xyz(current))
 
-    print(f"[find_pole] target={target} soln={soln}")
+    print(f"[find_pole] output {target} {soln}")
 
     return target, soln
 
@@ -188,11 +214,10 @@ def rot3d(alpha, beta, gamma):
          [cos(b) * sin(c), sin(a) * sin(b) * sin(c) + cos(a) * cos(c), cos(a) * sin(b) * sin(c) - sin(a) * cos(c)],
          [-sin(b), sin(a) * cos(b), cos(a) * cos(b)]])
 
-# simple way to find out where to start the minimiser search
-def global_search(cost):
-    grid = np.zeros((100, 100))
-    yaws = np.linspace(-5, 5, 100)
-    pitches = np.linspace(-5, 5, 100)
+def global_search(cost, center, bound, precision):
+    grid = np.zeros((precision, precision))
+    yaws = np.linspace(center[0]-bound, center[0]+bound, precision)
+    pitches = np.linspace(center[1]-bound, center[1]+bound, precision)
     for i, yaw in enumerate(yaws):
         for j, pitch in enumerate(pitches):
             grid[i, j] = cost((yaw, pitch))
@@ -210,28 +235,25 @@ def global_search(cost):
 
     return yaws[i], pitches[j]
 
-# incredibly simple and inefficient but it doesn't need to be fancy
-def minimize(cost, params, lr=0.01, eps=1e-6, iters=1000, tol=1e-10):
-    params = np.array(params, dtype=float)
-    for _ in range(iters):
-        grad = np.zeros_like(params)
-        c = cost(params)
-        for i in range(len(params)):
-            e = np.zeros_like(params)
-            e[i] = eps
-            grad[i] = (cost(params + e) - cost(params - e)) / (2 * eps)
-        params -= lr * grad
-        if np.linalg.norm(grad * lr) < tol:
-            break
-    return tuple(float(x) for x in params)
+def mk_precession_matrix(d):
+    return erfa.pmat06(*erfa.cal2jd(d.year, d.month, d.day))
+precession = mk_precession_matrix(datetime.date.today())
 
-def radec_to_xyz(radec):
+# if precess is true this will convert to local RA/DEC coordinates from J2000
+def radec_to_xyz(radec, precess=True):
     ra, dec = radec
     theta = math.radians(ra)
     phi = math.radians(90 - dec) # zero is the z axis
-    return np.array([cos(theta) * sin(phi), sin(theta) * sin(phi), cos(phi)])
+    xyz = np.array([cos(theta) * sin(phi), sin(theta) * sin(phi), cos(phi)])
+    if precess:
+        return precession @ xyz
+    else:
+        return xyz
 
-def xyz_to_radec(xyz):
+# if precess is true this will convert from local RA/DEC coordinates to J2000
+def xyz_to_radec(xyz, precess=True):
+    if precess:
+        xyz = precession.T @ xyz
     x, y, z = xyz
     dec = 90 - math.degrees(math.acos(np.clip(z, -1, 1)))
     ra = math.degrees(math.atan2(y, x)) % 360
@@ -260,6 +282,9 @@ def alignment_cost_function(samples):
     return cost
 
 if __name__ == "__main__":
+    # star = (88.792939, 7.407064)
+    # print(xyz_to_radec(radec_to_xyz(star), precess=False))
+
     import matplotlib.pyplot as plt
 
     # this extracts data from subs, and uses the time as the RA (only an approximation)
@@ -343,7 +368,30 @@ if __name__ == "__main__":
     # luddcam 5c338e8 solved to target=(205.70118015043897, 6.634966914527325) soln=(2.1717173758383503, 0.4545600080502908)
     # which is away from the original soln by almost a degree in RA
 
-    # FIXME FIXME FIXME investigate why polar alignment is so shit
+    # another data set, that didn't converge in the field, suspected because the
+    # search algorithm is poor and we don't take precession into account. This
+    # was version 62a2f5c.
+
+    # [find_pole] [(77.0129270207, 7.11885531219), (84.7890260388, 7.14939796301), (92.8590046434, 7.1696578711), (99.8603025848, 7.1763687924), (108.199464863, 7.17293732834), (116.690588354, 7.15214458513), (145.231878072, 6.98185969509), (150.258348017, 6.93657467203), (152.872766537, 6.9103064465)] (152.873403343, 6.91049351625)
+    # [find_pole] target=(152.80367006786076, 6.429840986711312) soln=(0.15153338765141927, 0.7575632050129316)
+    # after precession and better search, this moves to
+    # target = (152.80176532596045, 6.610639771226104)
+
+    # [find_pole] [(152.811686844, 6.38869471026), (148.867409319, 6.4131583176), (144.670568951, 6.433679568), (142.139461756, 6.45062456808), (121.060689604, 6.56704355527), (114.382892454, 6.6028124481), (106.811262961, 6.6402299675), (97.6968577775, 6.68374370799), (91.9143064265, 6.71059420249), (84.4219594629, 6.73860369112), (73.4884060134, 6.77053768166), (68.1310237622, 6.78246794205)] (68.1288933993, 6.78221356056)
+    # [find_pole] target=(68.1077756279273, 6.547492082493449) soln=(-0.2525300741689015, 0.15152225382281395)
+    # [find_pole] [(68.1410783118, 6.53915364929), (76.0664517961, 6.45351610358), (82.1436285159, 6.40498751457), (91.8303275601, 6.32762766555), (102.788445621, 6.24979640912), (114.426258281, 6.17530571333), (120.91005868, 6.13931660834), (146.897089826, 6.02865670514), (152.487930346, 6.01727166971), (156.485737255, 6.00942316008)] (156.485373553, 6.00974170218)
+    # [find_pole] target=(156.48132694052862, 6.486996715623789) soln=(-0.4545538577307046, -0.15151050140696357)
+
+    samples = [(77.0129270207, 7.11885531219),
+               (84.7890260388, 7.14939796301),
+               (92.8590046434, 7.1696578711),
+               (99.8603025848, 7.1763687924),
+               (108.199464863, 7.17293732834),
+               (116.690588354, 7.15214458513),
+               (145.231878072, 6.98185969509),
+               (150.258348017, 6.93657467203),
+               (152.872766537, 6.9103064465)]
+    current = (152.873403343, 6.91049351625)
 
     target, soln = find_pole(samples, samples[-1])
     print(f"target = {target}")
@@ -363,11 +411,12 @@ if __name__ == "__main__":
     ax.scatter([0], [0], [1], c='red', s=100)
 
     # some ra / dec lines, a bit ugly but it's just for testing
-    sphere = np.array([radec_to_xyz((ra, dec)) for dec in np.linspace(-80, 80, 10) for ra in np.linspace(0, 360, 50)])
-    ax.scatter(sphere[:, 0], sphere[:, 1], sphere[:, 2], c='grey', s=1)
-    sphere = np.array([radec_to_xyz((ra, dec)) for dec in np.linspace(-80, 80, 20) for ra in np.linspace(0, 360, 10)])
-    ax.scatter(sphere[:, 0], sphere[:, 1], sphere[:, 2], c='grey', s=2)
+    for dec in range(0, 90, 5):
+        n = 60 if dec % 15 == 0 else 15
+        sphere = np.array([radec_to_xyz((ra, dec)) for ra in np.linspace(0, 360, n)])
+        ax.scatter(sphere[:, 0], sphere[:, 1], sphere[:, 2], c='grey', s=1)
 
+    # TODO add some named stars
 
     # the solution / celestial pole
     ra_err, dec_err = soln

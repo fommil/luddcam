@@ -569,10 +569,13 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
         # TODO add a timeseries graph of recent focus magic scores
         # since live was enabled.
         if focus_magic:
+            # needs a plain background to make it easier to read
             top_left = f"Focus magic: {focus_magic:.2f}"
             top_left_text = font.render(top_left, True, WHITE)
             top_left_rect = top_left_text.get_rect()
             top_left_rect.topleft = (10, 10)
+            bg_rect = top_left_rect.inflate(8, 4)
+            pygame.draw.rect(surface, BLACK, bg_rect)
             surface.blit(top_left_text, top_left_rect)
         return
 
@@ -615,18 +618,12 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
                 if 2 <= len(ps):
                     lo, hi = min(p[0] for p in ps), max(p[0] for p in ps)
                     delta_ra = round(abs(ra_diff(lo, hi)))
-                    quality = ""
                     proceed = True
-                    if len(ps) < 3 or delta_ra < 45:
-                        quality = "not good"
+                    if len(ps) < 3 or delta_ra < 70:
                         proceed = False
-                    elif len(ps) < 4 or delta_ra < 90:
-                        quality = "OK"
-                    else:
-                        quality = "good"
-                    advice = f" ({format_dms(delta_ra)} from {len(ps)} samples is {quality})"
+                    advice = f" ({format_dms(delta_ra)} from {len(ps)} samples)"
                     if proceed:
-                        advice += " → press A"
+                        advice += " → half zenith → press A"
 
                 top_left2 = f"Slew RA to collect data{advice}"
             case True:

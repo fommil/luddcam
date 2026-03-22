@@ -32,6 +32,13 @@ b()
 nothing(4)
 snap("live_1")
 
+# check focus
+nothing(4)
+a()
+snap("live_1_zoom")
+a()
+
+# enable plate solving
 up()
 nothing(10)
 snap("live_1_plate")
