@@ -253,7 +253,7 @@ then turn it off and on again. You should see luddcam!
 
 - e-paper ✅
 - plate solving ✅
-- polar alignment ✅
+- polar alignment ✅ [documentation](./docs/alignment.md)
 - focus helper ✅
 - playback ✅
 
