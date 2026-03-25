@@ -4,6 +4,8 @@
 # sophisticated approach that solves in a single step but noting that the normal
 # of a plane is the pole, c.f.
 # https://www.ilikebigbits.com/2015_03_04_plane_from_points.html
+#
+# see docs/alignment.md for a high level overview
 
 import datetime
 import math
@@ -132,14 +134,12 @@ def plate_solve(hints, centroids, width, height, scale_factor, pixel_size, polar
                     hints.align_targets = (current, pole)
                     hints.align_error = soln
 
-                # TODO it would be good to update the align_error to give a
-                # realtime estimate of how close we are but that seems to
-                # involve a full resolve (or at the very least some cos/sin
-                # calculations).
-
                 probe, pole = hints.align_targets
                 if pole is not None:
-                    polar_alignment_targets = [tuple(a) for a in solver.radec_to_pixels([probe, pole])]
+                    # TODO support the South Celestial Pole too
+                    ncp = xyz_to_radec(radec_to_xyz((0.0, 90.0)), False)
+                    mp = (hints.align_error[0], hints.align_error[1])
+                    polar_alignment_targets = [tuple(a) for a in solver.radec_to_pixels([probe, pole, ncp, mp])]
 
     return PlateSolution(relevant_stars, relevant_dsos, polar_alignment_points, polar_alignment_targets)
 
@@ -233,7 +233,7 @@ def global_search(cost, center, bound, precision):
     # plt.gca().add_patch(circle)
     # plt.show()
 
-    return yaws[i], pitches[j]
+    return float(yaws[i]), float(pitches[j])
 
 def mk_precession_matrix(d):
     return erfa.pmat06(*erfa.cal2jd(d.year, d.month, d.day))
@@ -299,7 +299,7 @@ if __name__ == "__main__":
     #     height, width = img.shape
     #     data = img.astype(np.float32)
     #     objs = luddcam_astrometry.source_extract(data, cull=50)
-    #     solution = plate_solve(hints, objs, width, height, 1, headers.get("XPIXSZ"), None)
+    #     solution = plate_solve(hints, objs, width, height, 1, headers.get("XPIXSZ"), None, False)
     #     if solution:
     #         epoch = datetime.fromisoformat(headers["DATE"]).timestamp()
     #         if not start:

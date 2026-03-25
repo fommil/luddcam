@@ -25,6 +25,7 @@ compression_enabled = False
 
 WHITE=(255, 255, 255)
 BLACK=(0, 0, 0)
+PINK=(255, 105, 180)
 
 def tab(s):
     if len(s) == 0:

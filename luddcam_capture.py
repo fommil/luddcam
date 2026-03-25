@@ -535,8 +535,8 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
             draw_stars(img_surface, solution.relevant_stars, font)
 
         if solution.polar_alignment_targets:
-            (x1, y1), (x2, y2) = solution.polar_alignment_targets
-            # pin to the visible area
+            (x1, y1), (x2, y2), (x3, y3), (x4, y4) = solution.polar_alignment_targets
+            # pin these to the visible area (not the actual poles)
             x1 = min(max(1, x1), width - 1)
             y1 = min(max(1, y1), height - 1)
             x2 = min(max(1, x2), width - 1)
@@ -550,6 +550,23 @@ def render_frame_for_screen(surface, img_raw, zoom, meta, out, font, paused, sav
             # where we need to go
             pygame.draw.line(img_surface, WHITE, (x2 - size, y2), (x2 + size, y2), thickness)
             pygame.draw.line(img_surface, WHITE, (x2, y2 - size), (x2, y2 + size), thickness)
+            # the actual NCP (if in range)
+            if 0 <= x3 < width and 0 <= y3 < height:
+                # NCP is a triangle
+                s = 6
+                points = [(x3, y3 - s),
+                          (x3 - s, y3 + s),
+                          (x3 + s, y3 + s)]
+                pygame.draw.polygon(img_surface, WHITE, points, thickness)
+            # the mount's center of rotation (if in range)
+            if 0 <= x4 < width and 0 <= y4 < height:
+                # large square
+                s = 5
+                points = [(x4 - s, y4 - s),
+                          (x4 - s, y4 + s),
+                          (x4 + s, y4 + s),
+                          (x4 + s, y4 - s)]
+                pygame.draw.polygon(img_surface, WHITE, points, thickness)
 
         # we could include the x/y offset here and allow the out-of-frame DSOs to be
         # plotted outside the image, but that's a bit of a corner case. boom boom.
@@ -888,9 +905,9 @@ if __name__ == "__main__":
     # f = "test_data/osc/exposures/10.fit.fz"
     # actually a 30 second rgb exposure
     f = "test_data/osc/exposures/1.fit.fz"
-    #f = "tmp/guiding/Light_FOV_3.0s_Bin1_20250921-220306_0053.fit.fz"
+    f = "tmp/polar/Light_FOV_3.0s_Bin1_20250921-220306_0053.fit.fz"
 
-    f = "tmp/align/IMG_00004.fit.fz"
+    #f = "tmp/align/IMG_00004.fit.fz"
 
     #f = "tmp/align/IMG_00014.fit"
 
@@ -957,6 +974,11 @@ if __name__ == "__main__":
     hints.align_targets = ((156.598475782, (24.3985386574 + 24.6341121843) / 2),
                            (156.8726162416188, 24.932472683662183))
     hints.align_error = (0.25256720302354435, 0.7575697858059458)
+
+    hints.align_samples = [(60.65, 89.24),
+                           (50, 89)]
+    hints.align_targets = ((0.1, 90), (0.01, 89.9))
+    hints.align_error = (0.015, 89.8)
 
     align = True
 
