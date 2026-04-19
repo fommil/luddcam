@@ -1,10 +1,8 @@
 **Luddcam** is a minimalist astrophotography control system. Designed for a Raspberry Pi with an LCD or ePaper screen and game controller, it brings the feel of a classic DSLR to your astrocamera.
 
-Luddcam requires you to be physically present: focusing, framing your shot, checking your histograms, pressing the shutter, waiting patiently to see how it comes out. It's not about convenience or performance, it's about connection.
+Luddcam intentionally requires you to be physically present: focusing, framing your shot, checking your histograms, pressing the shutter, waiting patiently to see how it comes out. The luddite way is to minimise the amount of technology used for any given picture. Be present under the stars.
 
-Luddcam supports a few carefully chosen "cheat codes", like plate solving, polar alignment assist, and electronic filter wheels. But they are there as helpers, not crutches. Astrophotographers are encouraged to star hop to their targets (following printed star charts) instead of using go-to, use their mount's manual tracking or periodic error correction (PEC) whenever exposure and focal lengths allow it, and to manually change filters. The luddite way is to minimise the amount of technology used for any given picture, but the main objective is to be present, under the stars.
-
-Whether you're a DIY tinker-photographer, an analog romantic, or just someone who enjoys feeling the click of a real button under a dark sky, Luddcam is for you.
+Luddcam supports a few carefully chosen "cheat codes", like plate solving, polar alignment assist, and electronic filter wheels. But they are there as helpers, not crutches. Astrophotographers are encouraged to star hop to their targets (following printed star charts) instead of using go-to, use their mount's manual tracking or periodic error correction (PEC) whenever exposure and focal lengths allow it, and to manually change filters.
 
 If you want to take the best picture possible, and squeeze every ounce of performance out of your gear, you don't want luddcam... instead get an [ASIAIR](https://www.zwoastro.com/product-category/asiair/), [StellaVita](https://www.touptekastro.com/en-eu/products/stellavita), [StellarMate](https://stellarmate.com/) or a laptop with [SharpCap](https://www.sharpcap.co.uk/), [NINA](https://nighttime-imaging.eu/) and [PHD2](https://openphdguiding.org/).
 
