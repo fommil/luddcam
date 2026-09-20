@@ -22,7 +22,8 @@ def parse_siril_catalog(name, base="catalogs/", prefer_alias = True):
         return rows
 
 def filter_catalog(data, dec_min, dec_max, ra_min, ra_max):
-    return [o for o in data if dec_min <= o["dec"] < dec_max and ra_min <= o["ra"] <= ra_max]
+    ra_span = ra_max - ra_min
+    return [o for o in data if dec_min <= o["dec"] < dec_max and (o["ra"] - ra_min) % 360 <= ra_span]
 
 def relevant_stars(dec_min, dec_max, ra_min, ra_max):
     return filter_catalog(stars, dec_min, dec_max, ra_min, ra_max)
