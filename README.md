@@ -273,7 +273,9 @@ For version 2 I want to focus on hardware. There's a few directions I want to ex
 
 1. Cost: running on the smaller a [Raspberry Pi Zero 2](https://www.raspberrypi.com/products/raspberry-pi-zero-2-w/), possibly with a [GamePi13](https://thepihut.com/products/gamepi13-1-3-lcd-game-console-for-raspberry-pi-240-x240), could get the cost to less than $50.
 2. Size: if power consumption can be optimised, and casings made small enough, it might be possible to have something that could control a RASA / HyperStar without  diffraction spikes. That could involve an [external display](https://thepihut.com/products/m5papers3-esp32s3-development-kit-with-4-7-eink-display-960-x-540).
-3. Voice: a microphone and speaker could mean replacing the controller and screen, e.g. "how do I get to Casseopia?" followed by "left a bit, up a bit" responses. Or a plug-and-play standalone autoguider.
+3. Screen: A monochrome screen with transparent red film over it should be safe on dark adapted eyes, or just a regular SPI hardwired to red channel only.
+4. GPS / Accelerometer to improve plate solving and give accurate timestamps for the FITS and logs.
+5. Voice: a microphone and speaker could mean replacing the controller and screen, e.g. "how do I get to Casseopia?" followed by "left a bit, up a bit" responses (although can't be better than [PiFinder](https://www.pifinder.io/)). Or a plug-and-play standalone autoguider.
 
 # Luddite Score
 
